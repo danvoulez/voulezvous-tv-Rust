@@ -1,7 +1,13 @@
+pub mod browser;
 pub mod config;
 pub mod error;
 pub mod plan;
 
+pub use browser::{
+    BrowserAutomation, BrowserCapture, BrowserCaptureKind, BrowserError, BrowserEvent,
+    BrowserLauncher, BrowserMetrics, BrowserProfile, BrowserQaRunner, BrowserResult,
+    HumanMotionController, MetadataExtractor, PlaybackValidation,
+};
 pub use config::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
     BroadcasterConfig, BrowserConfig, ConfigBundle, ProcessorConfig, VvtvConfig,

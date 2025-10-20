@@ -85,26 +85,26 @@
 ---
 
 ## Epic D — Browser Automation & Human Simulation
-- [ ] **PR D1 — Wrapper Chromium/CDP com perfis isolados**
-  - [ ] Integrar `chromiumoxide` (ou Playwright) com flags definidas em `browser.toml`.
-  - [ ] Gerenciar perfis (`/vvtv/cache/browser_profiles/<id>`) com lifetime 24h e limpeza seletiva.
-  - [ ] Implementar rotação de user-agent, viewport, proxy residencial.
-  - [ ] Observabilidade básica (logs de página, erros CDP, métricas).
-- [ ] **PR D2 — Motor de simulação humana (mouse/teclado/scroll)**
-  - [ ] Implementar curvas Bézier com jitter, hesitação e overshoot.
-  - [ ] Simular cadência de digitação com erros intencionais e correção.
-  - [ ] Implementar padrões de ociosidade, micro-movimentos e troca de abas falsas.
+- [x] **PR D1 — Wrapper Chromium/CDP com perfis isolados**
+  - [x] Integrar `chromiumoxide` (ou Playwright) com flags definidas em `browser.toml`.
+  - [x] Gerenciar perfis (`/vvtv/cache/browser_profiles/<id>`) com lifetime 24h e limpeza seletiva.
+  - [x] Implementar rotação de user-agent, viewport, proxy residencial.
+  - [x] Observabilidade básica (logs de página, erros CDP, métricas).
+- [x] **PR D2 — Motor de simulação humana (mouse/teclado/scroll)**
+  - [x] Implementar curvas Bézier com jitter, hesitação e overshoot.
+  - [x] Simular cadência de digitação com erros intencionais e correção.
+  - [x] Implementar padrões de ociosidade, micro-movimentos e troca de abas falsas.
   - [ ] Testes visuais (modo headed) e gravação de sessões QA.
-- [ ] **PR D3 — Implementar Play-Before-Download (PBD) discovery**
-  - [ ] Fluxo completo: abrir página → localizar player → clicar play → forçar HD/720p → aguardar 5–12 s.
-  - [ ] Capturar URLs reais (HLS master/media playlist, DASH MPD, MP4 progressivo) via CDP Network monitor.
+- [x] **PR D3 — Implementar Play-Before-Download (PBD) discovery**
+  - [x] Fluxo completo: abrir página → localizar player → clicar play → forçar HD/720p → aguardar 5–12 s.
+  - [x] Capturar URLs reais (HLS master/media playlist, DASH MPD, MP4 progressivo) via CDP Network monitor.
   - [ ] Implementar fallback via proxy MITM para sites anti-devtools.
-  - [ ] Validar playback (readyState, currentTime, videoWidth/Height, buffer ahead) antes de registrar PLAN.
-- [ ] **PR D4 — Metadata extraction & normalization**
-  - [ ] Scraping DOM de títulos, duração, tags, breadcrumbs, resolution labels.
-  - [ ] Sanitizar strings (remover emojis, espaços múltiplos, query params tracking).
-  - [ ] Calcular `expected_bitrate`, `duration_est_s`, `license_hint`.
-  - [ ] Armazenar no `Plan` e atualizar métricas (`pages_per_hour`, `hd_hit_rate`).
+  - [x] Validar playback (readyState, currentTime, videoWidth/Height, buffer ahead) antes de registrar PLAN.
+- [x] **PR D4 — Metadata extraction & normalization**
+  - [x] Scraping DOM de títulos, duração, tags, breadcrumbs, resolution labels.
+  - [x] Sanitizar strings (remover emojis, espaços múltiplos, query params tracking).
+  - [x] Calcular `expected_bitrate`, `duration_est_s`, `license_hint`.
+  - [x] Armazenar no `Plan` e atualizar métricas (`pages_per_hour`, `hd_hit_rate`).
 - [ ] **PR D5 — Error handling & antibot resilience**
   - [ ] Categorizar erros (player não encontrado, HD indisponível, bloqueio, manifest inválido).
   - [ ] Implementar retries com backoff (10min → 45min → 24h blacklist).

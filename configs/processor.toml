@@ -1,0 +1,82 @@
+# VVTV Processor Configuration
+
+[download]
+tool = "aria2"
+max_retries = 3
+retry_delay_seconds = [180, 900]
+bandwidth_limit_mbps = 0
+resume_enabled = true
+
+[hls]
+vod_only = true
+verify_sequence = true
+rewrite_playlist = true
+
+[dash]
+prefer_h264 = true
+remux_to_hls = true
+
+[progressive]
+head_check = true
+min_size_mb = 2
+
+[remux]
+prefer_copy = true
+faststart = true
+fallback_transcode = true
+
+[transcode]
+# Video
+codec = "libx264"
+preset = "slow"
+crf = 20
+profile = "high"
+level = "4.2"
+pix_fmt = "yuv420p"
+
+# Keyframes
+keyint = 120
+min_keyint = 48
+scenecut = 40
+
+# VBV
+vbv_maxrate = "12000k"
+vbv_bufsize = "24000k"
+
+[loudnorm]
+# EBU R128 Two-pass
+enabled = true
+integrated = -14.0
+true_peak = -1.5
+lra = 11.0
+linear = true
+
+[profiles]
+# HLS 720p
+[profiles.hls_720p]
+scale = "720"
+video_bitrate = "3300k"
+maxrate = "3600k"
+bufsize = "6600k"
+audio_bitrate = "128k"
+preset = "veryfast"
+profile = "high"
+level = "4.0"
+
+# HLS 480p
+[profiles.hls_480p]
+scale = "480"
+video_bitrate = "1500k"
+maxrate = "1700k"
+bufsize = "3000k"
+audio_bitrate = "96k"
+preset = "veryfast"
+profile = "main"
+level = "3.1"
+
+[qc]
+ffprobe_validation = true
+checksums_sha256 = true
+duration_tolerance_percent = 5
+min_duration_video_s = 60
+min_duration_music_s = 90

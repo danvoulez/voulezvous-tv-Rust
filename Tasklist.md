@@ -41,22 +41,22 @@
 ---
 
 ## Epic B — Configuração Lógica & Orquestração de Configs
-- [ ] **PR B1 — Publicar arquivos TOML de configuração base**
-  - [ ] `vvtv.toml`: limites de buffer, CPU, diretórios, rede, segurança, economia.
-  - [ ] `browser.toml`: flags Chromium, user-agent pool, viewport, simulação humana, PBD, seletores.
-  - [ ] `processor.toml`: política de download (aria2), remux/transcode, loudnorm, perfis HLS, QC thresholds.
-  - [ ] `broadcaster.toml`: política FIFO + bump, HLS output, failover, watchdog, parâmetros FFmpeg.
-  - [ ] Validar parsing/config loader em Rust para cada módulo.
-- [ ] **PR B2 — Implementar CLI de gerenciamento (`vvtvctl`)**
-  - [ ] Comandos: `status`, `plan list`, `queue show`, `buffer fill`, `health check`.
-  - [ ] Implementar autenticação local (opcional) e saída JSON/humana.
-  - [ ] Integração com configs TOML para overrides temporários.
-  - [ ] Testes unitários para parsing de argumentos e comandos críticos.
-- [ ] **PR B3 — Configurar logline signatures e vault**
-  - [ ] Inicializar diretório `/vvtv/vault` com estrutura `snapshots/`, `keys/`, `manifests/`.
-  - [ ] Automatizar assinatura `logline sign` para configs críticos (`vvtv.toml`, scripts, snapshots).
-  - [ ] Armazenar chaves (`voulezvous_foundation.pem`) com permissões `600` e documentar rotação.
-  - [ ] Criar script `logline verify` para auditoria de integridade diária.
+- [x] **PR B1 — Publicar arquivos TOML de configuração base**
+  - [x] `vvtv.toml`: limites de buffer, CPU, diretórios, rede, segurança, economia.
+  - [x] `browser.toml`: flags Chromium, user-agent pool, viewport, simulação humana, PBD, seletores.
+  - [x] `processor.toml`: política de download (aria2), remux/transcode, loudnorm, perfis HLS, QC thresholds.
+  - [x] `broadcaster.toml`: política FIFO + bump, HLS output, failover, watchdog, parâmetros FFmpeg.
+  - [x] Validar parsing/config loader em Rust para cada módulo.
+- [x] **PR B2 — Implementar CLI de gerenciamento (`vvtvctl`)**
+  - [x] Comandos: `status`, `plan list`, `queue show`, `buffer fill`, `health check`.
+  - [x] Implementar autenticação local (opcional) e saída JSON/humana.
+  - [x] Integração com configs TOML para overrides temporários.
+  - [x] Testes unitários para parsing de argumentos e comandos críticos.
+- [x] **PR B3 — Configurar logline signatures e vault**
+  - [x] Inicializar diretório `/vvtv/vault` com estrutura `snapshots/`, `keys/`, `manifests/`.
+  - [x] Automatizar assinatura `logline sign` para configs críticos (`vvtv.toml`, scripts, snapshots).
+  - [x] Armazenar chaves (`voulezvous_foundation.pem`) com permissões `600` e documentar rotação.
+  - [x] Criar script `logline verify` para auditoria de integridade diária.
 
 ---
 

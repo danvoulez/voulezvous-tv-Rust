@@ -61,26 +61,26 @@
 ---
 
 ## Epic C — Planner & Realizer (Gestão de PLANs)
-- [ ] **PR C1 — Definir modelos e camada de acesso SQLite**
-  - [ ] Structs Rust para `Plan`, `PlanStatus`, `PlanMetrics` com `serde`.
-  - [ ] Implementar `SqlitePlanStore` (CRUD, filtros por status/score, locking). 
-  - [ ] Adicionar migrações/seeders para testes.
-  - [ ] Testes unitários para operações críticas (create, update status, scoring).
-- [ ] **PR C2 — Implementar motor de scoring e seleção (Planner)**
-  - [ ] Calcular `curation_score` combinando diversidade, tendência, duração.
-  - [ ] Agendar seleção T-4h (cron async) que move `planned` → `selected`.
-  - [ ] Aplicar heurística 80/20 (conteúdo diverso vs trending) e flags `hd_missing`.
-  - [ ] Registrar logs de decisões e atualizar métricas (`plans_created`, `plans_selected`).
-- [ ] **PR C3 — Implementar Realizer (pré-processamento)**
-  - [ ] Worker assíncrono que reserva slots, seta `selected` → `in_progress`/`downloaded`.
-  - [ ] Gerenciar locks por `plan_id` para evitar concorrência duplicada.
-  - [ ] Atualizar `updated_at`, gravar histórico de tentativas (com backoff).
-  - [ ] Integração com fila de processamento (notificação via canal interno ou tabela auxiliar).
-- [ ] **PR C4 — Scripts CLI para inspeção/maintenance de planos**
-  - [ ] `vvtvctl plan audit` (verificar planos antigos, expired, sem license).
-  - [ ] `vvtvctl plan blacklist --add/--remove` (domínios problemáticos).
-  - [ ] `vvtvctl plan import` (seed manual a partir de arquivo JSON).
-  - [ ] Documentar fluxos de uso para operadores.
+- [x] **PR C1 — Definir modelos e camada de acesso SQLite**
+  - [x] Structs Rust para `Plan`, `PlanStatus`, `PlanMetrics` com `serde`.
+  - [x] Implementar `SqlitePlanStore` (CRUD, filtros por status/score, locking).
+  - [x] Adicionar migrações/seeders para testes.
+  - [x] Testes unitários para operações críticas (create, update status, scoring).
+- [x] **PR C2 — Implementar motor de scoring e seleção (Planner)**
+  - [x] Calcular `curation_score` combinando diversidade, tendência, duração.
+  - [x] Agendar seleção T-4h (cron async) que move `planned` → `selected`.
+  - [x] Aplicar heurística 80/20 (conteúdo diverso vs trending) e flags `hd_missing`.
+  - [x] Registrar logs de decisões e atualizar métricas (`plans_created`, `plans_selected`).
+- [x] **PR C3 — Implementar Realizer (pré-processamento)**
+  - [x] Worker assíncrono que reserva slots, seta `selected` → `in_progress`/`downloaded`.
+  - [x] Gerenciar locks por `plan_id` para evitar concorrência duplicada.
+  - [x] Atualizar `updated_at`, gravar histórico de tentativas (com backoff).
+  - [x] Integração com fila de processamento (notificação via canal interno ou tabela auxiliar).
+- [x] **PR C4 — Scripts CLI para inspeção/maintenance de planos**
+  - [x] `vvtvctl plan audit` (verificar planos antigos, expired, sem license).
+  - [x] `vvtvctl plan blacklist --add/--remove` (domínios problemáticos).
+  - [x] `vvtvctl plan import` (seed manual a partir de arquivo JSON).
+  - [x] Documentar fluxos de uso para operadores.
 
 ---
 

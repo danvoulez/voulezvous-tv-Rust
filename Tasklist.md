@@ -11,32 +11,32 @@
 ---
 
 ## Epic A — Fundamentos Físicos e Setup Base
-- [ ] **PR A1 — Provisionar ambiente físico e rede de operação**
-  - [ ] Inventariar hardware (Mac Mini M1/M2, storage externo, UPS) e validar temperatura/umidade do ambiente.
-  - [ ] Configurar infraestrutura elétrica (UPS ≥1500 VA, monitorar consumo, rotular cabos).
-  - [ ] Habilitar e configurar malha Tailscale (`voulezvous.ts.net`) com hostnames fixos.
-  - [ ] Documentar layout físico, incluindo padrões visuais (luvas cinza, unhas grafite fosco).
-- [ ] **PR A2 — Inicializar estrutura de diretórios e permissões /vvtv**
-  - [ ] Criar diretórios raiz (`/vvtv/system`, `/vvtv/data`, `/vvtv/cache`, `/vvtv/storage`, `/vvtv/broadcast`, `/vvtv/monitor`, `/vvtv/vault`).
-  - [ ] Criar usuário `vvtv` (UID 9001) e aplicar `chown`/`chmod` corretos (bin 755, bancos 600).
-  - [ ] Provisionar scripts utilitários iniciais (`check_stream_health.sh`, `halt_stream.sh`, `fill_buffer.sh`).
-  - [ ] Configurar logrotate/retention (7–14 dias) para `/vvtv/system/logs`.
-- [ ] **PR A3 — Instalar stack base de software**
-  - [ ] Automatizar instalação de FFmpeg (com codecs h264, aac, libx265, opus, rtmp, hls, srt), SQLite3, NGINX-RTMP, aria2, Chromium, Rust toolchain, tailscale.
-  - [ ] Garantir compile flags adequadas (macOS brew, Debian apt) e validar versões mínimas.
-  - [ ] Desabilitar serviços indesejados (Spotlight, Sleep, Time Machine) e configurar firewall interno.
-  - [ ] Registrar script de health check `/vvtv/system/bin/check_stream_health.sh` com métricas de fila/buffer/processos.
-- [ ] **PR A4 — Configurar NGINX-RTMP origin mínimo**
-  - [ ] Criar `/vvtv/broadcast/nginx.conf` com RTMP listen 1935, aplicação `live`, saída HLS, restrições de publish/play.
-  - [ ] Subir serviço (systemd/launchd), validar endpoints `/hls` e `/status`.
-  - [ ] Implementar rotação automática de segmentos (4 s, playlist 48 min) e políticas de cache/no-cache.
-  - [ ] Criar monitoramento básico do serviço (systemctl unit + health check script).
-- [ ] **PR A5 — Criar esquemas SQLite iniciais**
-  - [ ] `plans.sqlite`: tabela principal com índices por status/score.
-  - [ ] `queue.sqlite`: playout_queue com índices (status+created_at).
-  - [ ] `metrics.sqlite`: métricas operacionais (buffer, queue_length, cpu, temperatura, etc.).
-  - [ ] `economy.sqlite`: ledger econômico (`event_type`, `value_eur`, `proof`).
-  - [ ] Popular scripts SQL (migrações) e testes de integridade (`PRAGMA integrity_check`).
+- [x] **PR A1 — Provisionar ambiente físico e rede de operação**
+  - [x] Inventariar hardware (Mac Mini M1/M2, storage externo, UPS) e validar temperatura/umidade do ambiente.
+  - [x] Configurar infraestrutura elétrica (UPS ≥1500 VA, monitorar consumo, rotular cabos).
+  - [x] Habilitar e configurar malha Tailscale (`voulezvous.ts.net`) com hostnames fixos.
+  - [x] Documentar layout físico, incluindo padrões visuais (luvas cinza, unhas grafite fosco).
+- [x] **PR A2 — Inicializar estrutura de diretórios e permissões /vvtv**
+  - [x] Criar diretórios raiz (`/vvtv/system`, `/vvtv/data`, `/vvtv/cache`, `/vvtv/storage`, `/vvtv/broadcast`, `/vvtv/monitor`, `/vvtv/vault`).
+  - [x] Criar usuário `vvtv` (UID 9001) e aplicar `chown`/`chmod` corretos (bin 755, bancos 600).
+  - [x] Provisionar scripts utilitários iniciais (`check_stream_health.sh`, `halt_stream.sh`, `fill_buffer.sh`).
+  - [x] Configurar logrotate/retention (7–14 dias) para `/vvtv/system/logs`.
+- [x] **PR A3 — Instalar stack base de software**
+  - [x] Automatizar instalação de FFmpeg (com codecs h264, aac, libx265, opus, rtmp, hls, srt), SQLite3, NGINX-RTMP, aria2, Chromium, Rust toolchain, tailscale.
+  - [x] Garantir compile flags adequadas (macOS brew, Debian apt) e validar versões mínimas.
+  - [x] Desabilitar serviços indesejados (Spotlight, Sleep, Time Machine) e configurar firewall interno.
+  - [x] Registrar script de health check `/vvtv/system/bin/check_stream_health.sh` com métricas de fila/buffer/processos.
+- [x] **PR A4 — Configurar NGINX-RTMP origin mínimo**
+  - [x] Criar `/vvtv/broadcast/nginx.conf` com RTMP listen 1935, aplicação `live`, saída HLS, restrições de publish/play.
+  - [x] Subir serviço (systemd/launchd), validar endpoints `/hls` e `/status`.
+  - [x] Implementar rotação automática de segmentos (4 s, playlist 48 min) e políticas de cache/no-cache.
+  - [x] Criar monitoramento básico do serviço (systemctl unit + health check script).
+- [x] **PR A5 — Criar esquemas SQLite iniciais**
+  - [x] `plans.sqlite`: tabela principal com índices por status/score.
+  - [x] `queue.sqlite`: playout_queue com índices (status+created_at).
+  - [x] `metrics.sqlite`: métricas operacionais (buffer, queue_length, cpu, temperatura, etc.).
+  - [x] `economy.sqlite`: ledger econômico (`event_type`, `value_eur`, `proof`).
+  - [x] Popular scripts SQL (migrações) e testes de integridade (`PRAGMA integrity_check`).
 
 ---
 

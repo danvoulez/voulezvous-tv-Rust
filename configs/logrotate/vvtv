@@ -1,0 +1,13 @@
+/vvtv/system/logs/*.log /vvtv/system/logs/*.txt /vvtv/system/logs/*.md {
+    daily
+    rotate 14
+    missingok
+    compress
+    delaycompress
+    notifempty
+    create 640 vvtv vvtv
+    sharedscripts
+    postrotate
+        /bin/systemctl reload vvtv-nginx.service >/dev/null 2>&1 || true
+    endscript
+}

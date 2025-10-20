@@ -3,14 +3,17 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::str::FromStr;
 
+use chrono::{DateTime, SecondsFormat, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
 use thiserror::Error;
 use vvtv_core::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
-    ConfigBundle,
+    ConfigBundle, Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord,
+    PlanMetrics, PlanStatus, SqlitePlanStore,
 };
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -25,10 +28,14 @@ pub enum AppError {
     Database(#[from] rusqlite::Error),
     #[error("serialization error: {0}")]
     Serialize(#[from] serde_json::Error),
+    #[error("plan error: {0}")]
+    Plan(#[from] vvtv_core::PlanError),
     #[error("authentication failed")]
     Authentication,
     #[error("required resource missing: {0}")]
     MissingResource(String),
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
     #[error("script execution failed with status {status:?}: {stderr}")]
     ScriptFailure { status: Option<i32>, stderr: String },
 }
@@ -105,6 +112,13 @@ pub enum Commands {
 pub enum PlanCommands {
     /// Lista planos registrados no banco
     List(PlanListArgs),
+    /// Executa auditoria de planos
+    Audit(PlanAuditArgs),
+    /// Gerencia blacklist de planos
+    #[command(subcommand)]
+    Blacklist(PlanBlacklistCommands),
+    /// Importa planos a partir de um arquivo JSON
+    Import(PlanImportArgs),
 }
 
 #[derive(Args, Debug)]
@@ -115,6 +129,50 @@ pub struct PlanListArgs {
     /// Limite de registros retornados
     #[arg(long, default_value_t = 10)]
     pub limit: usize,
+}
+
+#[derive(Args, Debug)]
+pub struct PlanAuditArgs {
+    /// Mostrar apenas findings com idade maior que este limite (horas)
+    #[arg(long, default_value_t = 0.0)]
+    pub min_age_hours: f64,
+    /// Filtrar por tipo específico de finding
+    #[arg(long)]
+    pub kind: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PlanBlacklistCommands {
+    /// Lista entradas da blacklist
+    List,
+    /// Adiciona domínio à blacklist
+    Add(PlanBlacklistAddArgs),
+    /// Remove domínio da blacklist
+    Remove(PlanBlacklistRemoveArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct PlanBlacklistAddArgs {
+    /// Domínio a ser bloqueado
+    pub domain: String,
+    /// Motivo opcional
+    #[arg(long)]
+    pub reason: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct PlanBlacklistRemoveArgs {
+    /// Domínio a ser removido
+    pub domain: String,
+}
+
+#[derive(Args, Debug)]
+pub struct PlanImportArgs {
+    /// Caminho do arquivo JSON contendo planos
+    pub path: PathBuf,
+    /// Força sobrescrita de planos existentes
+    #[arg(long, default_value_t = false)]
+    pub overwrite: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -164,10 +222,24 @@ pub fn run(cli: Cli) -> Result<()> {
             let status = context.gather_status()?;
             render(&status, cli.format)?;
         }
-        Commands::Plan(PlanCommands::List(args)) => {
-            let plans = context.plan_list(args)?;
-            render(&plans, cli.format)?;
-        }
+        Commands::Plan(command) => match command {
+            PlanCommands::List(args) => {
+                let plans = context.plan_list(args)?;
+                render(&plans, cli.format)?;
+            }
+            PlanCommands::Audit(args) => {
+                let audit = context.plan_audit(args)?;
+                render(&audit, cli.format)?;
+            }
+            PlanCommands::Blacklist(args) => {
+                let result = context.plan_blacklist(args)?;
+                render(&result, cli.format)?;
+            }
+            PlanCommands::Import(args) => {
+                let result = context.plan_import(args)?;
+                render(&result, cli.format)?;
+            }
+        },
         Commands::Queue(QueueCommands::Show(args)) => {
             let queue = context.queue_show(args)?;
             render(&queue, cli.format)?;
@@ -322,7 +394,11 @@ impl AppContext {
             environment: self.bundle.vvtv.system.environment.clone(),
         };
 
-        let plan_counts = self.plan_counts().unwrap_or_default();
+        let plan_metrics = self.plan_metrics();
+        let plan_counts = plan_metrics
+            .as_ref()
+            .map(|metrics| metrics.by_status.clone())
+            .unwrap_or_default();
         let queue_counts = self.queue_counts().unwrap_or_default();
         let metrics = self.metrics_snapshot()?;
 
@@ -331,33 +407,95 @@ impl AppContext {
             plan_counts,
             queue_counts,
             metrics,
+            plan_metrics,
         })
     }
 
     fn plan_list(&self, args: &PlanListArgs) -> Result<PlanList> {
-        let conn = self.open_database(&self.plans_db)?;
-        let mut stmt = conn.prepare(
-            "SELECT plan_id, title, status, duration_est_s, curation_score, updated_at, created_at \
-             FROM plans \
-             WHERE (?1 IS NULL OR status = ?1) \
-             ORDER BY updated_at DESC NULLS LAST, created_at DESC \
-             LIMIT ?2",
-        )?;
-        let rows = stmt
-            .query_map((args.status.as_ref(), args.limit as i64), |row| {
-                Ok(PlanEntry {
-                    plan_id: row.get(0)?,
-                    title: row.get(1)?,
-                    status: row.get(2)?,
-                    duration_est_s: row.get::<_, Option<i64>>(3)?,
-                    curation_score: row.get::<_, Option<f64>>(4)?,
-                    updated_at: row.get::<_, Option<String>>(5)?,
-                    created_at: row.get::<_, Option<String>>(6)?,
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let status = match &args.status {
+            Some(value) => Some(
+                PlanStatus::from_str(value)
+                    .map_err(|_| AppError::InvalidArgument(format!("status inválido: {value}")))?,
+            ),
+            None => None,
+        };
+        let store = self.plan_store(true)?;
+        let plans = store.list_by_status(status, args.limit)?;
+        let rows = plans
+            .into_iter()
+            .map(|plan| PlanEntry {
+                plan_id: plan.plan_id,
+                title: plan.title,
+                status: plan.status.to_string(),
+                duration_est_s: plan.duration_est_s,
+                curation_score: Some(plan.curation_score),
+                updated_at: format_datetime(plan.updated_at),
+                created_at: format_datetime(plan.created_at),
+                kind: plan.kind,
+                hd_missing: plan.hd_missing,
+            })
+            .collect();
 
         Ok(PlanList { rows })
+    }
+
+    fn plan_audit(&self, args: &PlanAuditArgs) -> Result<PlanAuditReport> {
+        let store = self.plan_store(true)?;
+        let mut findings = store.audit(chrono::Utc::now())?;
+        if let Some(kind) = &args.kind {
+            let filter = parse_audit_kind(kind)?;
+            findings.retain(|finding| finding.kind == filter);
+        }
+        if args.min_age_hours > 0.0 {
+            findings.retain(|finding| finding.age_hours >= args.min_age_hours);
+        }
+        Ok(PlanAuditReport { findings })
+    }
+
+    fn plan_blacklist(&self, command: &PlanBlacklistCommands) -> Result<PlanBlacklistResult> {
+        match command {
+            PlanBlacklistCommands::List => {
+                let store = self.plan_store(true)?;
+                let entries = store.blacklist_list()?;
+                Ok(PlanBlacklistResult::List { entries })
+            }
+            PlanBlacklistCommands::Add(args) => {
+                let store = self.plan_store(false)?;
+                let entry = store.blacklist_add(&args.domain, args.reason.as_deref())?;
+                Ok(PlanBlacklistResult::Ack {
+                    message: format!("Domínio {} adicionado", entry.domain),
+                })
+            }
+            PlanBlacklistCommands::Remove(args) => {
+                let store = self.plan_store(false)?;
+                store.blacklist_remove(&args.domain)?;
+                Ok(PlanBlacklistResult::Ack {
+                    message: format!("Domínio {} removido", args.domain),
+                })
+            }
+        }
+    }
+
+    fn plan_import(&self, args: &PlanImportArgs) -> Result<PlanImportResult> {
+        if !args.path.exists() {
+            return Err(AppError::MissingResource(format!(
+                "Arquivo não encontrado: {}",
+                args.path.display()
+            )));
+        }
+        let content = fs::read_to_string(&args.path)?;
+        let mut records = parse_plan_import(&content, args.overwrite)?;
+        if args.overwrite {
+            for record in &mut records {
+                record.overwrite = true;
+            }
+        }
+        let store = self.plan_store(false)?;
+        let imported = store.import(&records)?;
+        Ok(PlanImportResult {
+            imported,
+            total: records.len(),
+        })
     }
 
     fn queue_show(&self, args: &QueueShowArgs) -> Result<QueueList> {
@@ -496,23 +634,6 @@ impl AppContext {
         Ok(conn)
     }
 
-    fn plan_counts(&self) -> Option<HashMap<String, i64>> {
-        let conn = self.open_database(&self.plans_db).ok()?;
-        let mut stmt = conn
-            .prepare("SELECT status, COUNT(*) FROM plans GROUP BY status")
-            .ok()?;
-        let mut map = HashMap::new();
-        for row in stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .ok()?
-        {
-            if let Ok((status, count)) = row {
-                map.insert(status, count);
-            }
-        }
-        Some(map)
-    }
-
     fn queue_counts(&self) -> Option<HashMap<String, i64>> {
         let conn = self.open_database(&self.queue_db).ok()?;
         let mut stmt = conn
@@ -528,6 +649,25 @@ impl AppContext {
             }
         }
         Some(map)
+    }
+
+    fn plan_metrics(&self) -> Option<PlanMetrics> {
+        let store = self.plan_store(true).ok()?;
+        store.compute_metrics().ok()
+    }
+
+    fn plan_store(&self, read_only: bool) -> Result<SqlitePlanStore> {
+        if !self.plans_db.exists() {
+            return Err(AppError::MissingResource(format!(
+                "Banco de dados ausente: {}",
+                self.plans_db.display()
+            )));
+        }
+        let builder = SqlitePlanStore::builder()
+            .path(&self.plans_db)
+            .create_if_missing(false)
+            .read_only(read_only);
+        Ok(builder.build()?)
     }
 
     fn metrics_snapshot(&self) -> Result<Option<MetricsSnapshot>> {
@@ -559,7 +699,9 @@ impl AppContext {
 pub struct StatusReport {
     pub node: NodeStatus,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub plan_counts: HashMap<String, i64>,
+    pub plan_counts: HashMap<String, usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_metrics: Option<PlanMetrics>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub queue_counts: HashMap<String, i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -576,6 +718,10 @@ impl DisplayFallback for StatusReport {
             lines.push("Planos:".to_string());
             for (status, count) in self.plan_counts.iter() {
                 lines.push(format!("  - {status}: {count}"));
+            }
+            if let Some(metrics) = &self.plan_metrics {
+                lines.push(format!("  - HD missing: {}", metrics.hd_missing));
+                lines.push(format!("  - Score médio: {:.2}", metrics.average_score));
             }
         }
         if !self.queue_counts.is_empty() {
@@ -640,17 +786,120 @@ impl DisplayFallback for PlanList {
                 .duration_est_s
                 .map(|v| format!("{v}s"))
                 .unwrap_or_else(|| "-".to_string());
+            let mut extras = Vec::new();
+            if entry.hd_missing {
+                extras.push("hd_missing".to_string());
+            }
+            if let Some(updated) = &entry.updated_at {
+                extras.push(format!("updated={updated}"));
+            }
+            let extras = if extras.is_empty() {
+                String::new()
+            } else {
+                format!(" | {}", extras.join(", "))
+            };
             lines.push(format!(
-                "{} | {} | status={} | score={} | dur={}",
+                "{} | {} | status={} | kind={} | score={} | dur={}{}",
                 entry.plan_id,
                 entry.title.as_deref().unwrap_or("<sem título>"),
                 entry.status,
+                entry.kind,
                 score,
-                duration
+                duration,
+                extras
             ));
         }
         lines.join("\n")
     }
+}
+
+impl DisplayFallback for PlanAuditReport {
+    fn display(&self) -> String {
+        if self.findings.is_empty() {
+            return "Nenhuma inconformidade encontrada".to_string();
+        }
+        let mut lines = Vec::new();
+        for finding in &self.findings {
+            let mut line = format!(
+                "{} | kind={} | status={} | age={:.1}h",
+                finding.plan_id,
+                finding.kind.to_string(),
+                finding.status,
+                finding.age_hours
+            );
+            if let Some(note) = &finding.note {
+                line.push_str(&format!(" | {}", note));
+            }
+            lines.push(line);
+        }
+        lines.join("\n")
+    }
+}
+
+impl DisplayFallback for PlanBlacklistResult {
+    fn display(&self) -> String {
+        match self {
+            PlanBlacklistResult::List { entries } => {
+                if entries.is_empty() {
+                    "Blacklist vazia".to_string()
+                } else {
+                    let mut lines = Vec::new();
+                    for entry in entries {
+                        let mut line = entry.domain.clone();
+                        if let Some(reason) = &entry.reason {
+                            line.push_str(&format!(" — {}", reason));
+                        }
+                        lines.push(line);
+                    }
+                    lines.join("\n")
+                }
+            }
+            PlanBlacklistResult::Ack { message } => message.clone(),
+        }
+    }
+}
+
+impl DisplayFallback for PlanImportResult {
+    fn display(&self) -> String {
+        format!("Importados {}/{} planos", self.imported, self.total)
+    }
+}
+
+fn format_datetime(dt: Option<DateTime<Utc>>) -> Option<String> {
+    dt.map(|value| value.to_rfc3339_opts(SecondsFormat::Secs, true))
+}
+
+fn parse_audit_kind(value: &str) -> Result<PlanAuditKind> {
+    match value.to_lowercase().as_str() {
+        "expired" => Ok(PlanAuditKind::Expired),
+        "missing_license" | "license" => Ok(PlanAuditKind::MissingLicense),
+        "hd_missing" | "hd" => Ok(PlanAuditKind::HdMissing),
+        "stuck" => Ok(PlanAuditKind::Stuck),
+        other => Err(AppError::InvalidArgument(format!(
+            "tipo de auditoria inválido: {other}"
+        ))),
+    }
+}
+
+fn parse_plan_import(content: &str, overwrite: bool) -> Result<Vec<PlanImportRecord>> {
+    if let Ok(records) = serde_json::from_str::<Vec<PlanImportRecord>>(content) {
+        return Ok(records);
+    }
+    if let Ok(record) = serde_json::from_str::<PlanImportRecord>(content) {
+        return Ok(vec![record]);
+    }
+    if let Ok(plans) = serde_json::from_str::<Vec<Plan>>(content) {
+        return Ok(plans
+            .into_iter()
+            .map(|plan| PlanImportRecord { plan, overwrite })
+            .collect());
+    }
+    if let Ok(plan) = serde_json::from_str::<Plan>(content) {
+        return Ok(vec![PlanImportRecord { plan, overwrite }]);
+    }
+    Err(AppError::InvalidArgument(
+        "Arquivo JSON inválido para import".to_string(),
+    ))
 }
 
 impl DisplayFallback for QueueList {
@@ -719,6 +968,26 @@ pub struct PlanEntry {
     pub curation_score: Option<f64>,
     pub updated_at: Option<String>,
     pub created_at: Option<String>,
+    pub kind: String,
+    pub hd_missing: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PlanAuditReport {
+    pub findings: Vec<PlanAuditFinding>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum PlanBlacklistResult {
+    List { entries: Vec<PlanBlacklistEntry> },
+    Ack { message: String },
+}
+
+#[derive(Debug, Serialize)]
+pub struct PlanImportResult {
+    pub imported: usize,
+    pub total: usize,
 }
 
 #[derive(Debug, Serialize)]

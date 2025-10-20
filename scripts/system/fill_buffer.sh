@@ -12,6 +12,8 @@ USAGE
 
 TARGET_HOURS=6
 DRY_RUN=false
+DATA_DIR=${VVTV_DATA_DIR:-/vvtv/data}
+STORAGE_DIR=${VVTV_STORAGE_DIR:-/vvtv/storage}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,7 +48,11 @@ require_sqlite() {
 
 require_sqlite
 
-BUFFER=$(sqlite3 /vvtv/data/metrics.sqlite "SELECT buffer_duration_h FROM metrics ORDER BY ts DESC LIMIT 1;" 2>/dev/null || echo 0)
+METRICS_DB="$DATA_DIR/metrics.sqlite"
+PLANS_DB="$DATA_DIR/plans.sqlite"
+QUEUE_DB="$DATA_DIR/queue.sqlite"
+
+BUFFER=$(sqlite3 "$METRICS_DB" "SELECT buffer_duration_h FROM metrics ORDER BY ts DESC LIMIT 1;" 2>/dev/null || echo 0)
 BUFFER=${BUFFER:-0}
 log "Buffer atual: ${BUFFER}h"
 
@@ -67,7 +73,7 @@ SQL="WITH candidates AS (
 )
 SELECT plan_id, duration_est_s FROM candidates;"
 
-mapfile -t rows < <(sqlite3 -csv /vvtv/data/plans.sqlite "$SQL")
+mapfile -t rows < <(sqlite3 -csv "$PLANS_DB" "$SQL")
 
 if [[ ${#rows[@]} -eq 0 ]]; then
   log "[WARN] Nenhum plano disponível para seleção"
@@ -82,10 +88,10 @@ for row in "${rows[@]}"; do
   log "Selecionando plano $plan_id (${hours}h)"
 
   if ! $DRY_RUN; then
-    sqlite3 /vvtv/data/queue.sqlite <<SQL
+    sqlite3 "$QUEUE_DB" <<SQL
 BEGIN;
 INSERT INTO playout_queue (plan_id, asset_path, duration_s, status, curation_score)
-VALUES ('$plan_id', '/vvtv/storage/ready/$plan_id.mp4', $duration, 'queued', 0);
+VALUES ('$plan_id', '$STORAGE_DIR/ready/$plan_id.mp4', $duration, 'queued', 0);
 UPDATE plans SET status = 'selected', updated_at = CURRENT_TIMESTAMP WHERE plan_id = '$plan_id';
 COMMIT;
 SQL

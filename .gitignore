@@ -1,0 +1,4 @@
+/target/
+**/*.logline
+/.env
+.DS_Store

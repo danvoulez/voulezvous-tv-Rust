@@ -1,0 +1,93 @@
+# VVTV Main Configuration
+# Version: 1.0
+# Institution: VoulezVous Foundation
+
+[system]
+node_name = "vvtv-primary"
+node_role = "broadcast"
+node_id = "vvtv-node-001"
+environment = "production"
+
+[paths]
+base_dir = "/vvtv"
+data_dir = "/vvtv/data"
+cache_dir = "/vvtv/cache"
+storage_dir = "/vvtv/storage"
+broadcast_dir = "/vvtv/broadcast"
+logs_dir = "/vvtv/system/logs"
+vault_dir = "/vvtv/vault"
+
+[limits]
+# Buffer management
+buffer_target_hours = 6
+buffer_warning_hours = 3
+buffer_critical_hours = 1.5
+
+# Concurrency
+max_concurrent_downloads = 2
+max_concurrent_transcodes = 2
+max_browser_instances = 2
+
+# Resource limits
+cpu_limit_percent = 75
+memory_limit_gb = 12
+disk_warning_percent = 80
+disk_critical_percent = 90
+
+# Retention
+plans_retention_days = 30
+played_retention_hours = 72
+logs_retention_days = 14
+cache_retention_hours = 24
+
+[network]
+tailscale_domain = "voulezvous.ts.net"
+rtmp_port = 1935
+hls_port = 8080
+control_port = 9000
+
+# CDN
+cdn_primary = "cloudflare"
+cdn_backup = "backblaze"
+
+[quality]
+# Audio
+target_lufs = -14.0
+lufs_tolerance = 1.5
+audio_codec = "aac"
+audio_bitrate = "160k"
+
+# Video
+vmaf_threshold = 85
+ssim_threshold = 0.92
+target_resolution = "1080p"
+fallback_resolution = "720p"
+
+# HLS
+hls_segment_duration = 4
+hls_playlist_length_minutes = 48
+
+[security]
+sandbox_enabled = true
+fingerprint_randomization = true
+proxy_rotation_enabled = true
+csam_check_enabled = true
+drm_detection_abort = true
+
+# Firewall
+allow_rtmp_from = ["tailscale"]
+allow_hls_from = ["tailscale", "cdn"]
+allow_ssh_from = ["tailscale"]
+
+[monitoring]
+health_check_interval_seconds = 60
+metrics_collection_interval_seconds = 300
+capture_interval_minutes = 5
+alert_telegram_enabled = true
+alert_email_enabled = false
+
+[economy]
+monetization_enabled = true
+base_rate_per_minute = 0.001
+ledger_export_interval_hours = 24
+reconciliation_interval_days = 7

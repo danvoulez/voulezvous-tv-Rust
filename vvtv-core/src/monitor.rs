@@ -473,8 +473,10 @@ impl MetricsStore {
             "INSERT INTO metrics (
                 buffer_duration_h, queue_length, played_last_hour, failures_last_hour,
                 avg_cpu_load, avg_temp_c, latency_s, stream_bitrate_mbps, vmaf_live,
-                audio_peak_db, freeze_events, black_frame_ratio, signature_deviation
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                audio_peak_db, freeze_events, black_frame_ratio, signature_deviation,
+                power_watts, ups_runtime_minutes, ups_charge_percent, ups_status,
+                ssd_wear_percent, gpu_temp_c, ssd_temp_c, fan_rpm
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
                 record.buffer_duration_h,
                 record.queue_length,
@@ -488,7 +490,15 @@ impl MetricsStore {
                 record.audio_peak_db,
                 record.freeze_events,
                 record.black_frame_ratio,
-                record.signature_deviation
+                record.signature_deviation,
+                record.power_watts,
+                record.ups_runtime_minutes,
+                record.ups_charge_percent,
+                record.ups_status.as_deref(),
+                record.ssd_wear_percent,
+                record.gpu_temp_c,
+                record.ssd_temp_c,
+                record.fan_rpm
             ],
         )?;
         Ok(())
@@ -499,7 +509,9 @@ impl MetricsStore {
         let mut stmt = conn.prepare(
             "SELECT ts, buffer_duration_h, queue_length, played_last_hour, failures_last_hour,
                     avg_cpu_load, avg_temp_c, latency_s, stream_bitrate_mbps, vmaf_live,
-                    audio_peak_db, freeze_events, black_frame_ratio, signature_deviation
+                    audio_peak_db, freeze_events, black_frame_ratio, signature_deviation,
+                    power_watts, ups_runtime_minutes, ups_charge_percent, ups_status,
+                    ssd_wear_percent, gpu_temp_c, ssd_temp_c, fan_rpm
              FROM metrics ORDER BY ts DESC LIMIT 1",
         )?;
         let snapshot = stmt
@@ -513,7 +525,9 @@ impl MetricsStore {
         let mut stmt = conn.prepare(
             "SELECT ts, buffer_duration_h, queue_length, played_last_hour, failures_last_hour,
                     avg_cpu_load, avg_temp_c, latency_s, stream_bitrate_mbps, vmaf_live,
-                    audio_peak_db, freeze_events, black_frame_ratio, signature_deviation
+                    audio_peak_db, freeze_events, black_frame_ratio, signature_deviation,
+                    power_watts, ups_runtime_minutes, ups_charge_percent, ups_status,
+                    ssd_wear_percent, gpu_temp_c, ssd_temp_c, fan_rpm
              FROM metrics ORDER BY ts DESC LIMIT ?1",
         )?;
         let mut rows = stmt.query([limit as i64])?;
@@ -634,6 +648,14 @@ pub struct MetricRecord {
     pub freeze_events: i64,
     pub black_frame_ratio: f64,
     pub signature_deviation: f64,
+    pub power_watts: Option<f64>,
+    pub ups_runtime_minutes: Option<f64>,
+    pub ups_charge_percent: Option<f64>,
+    pub ups_status: Option<String>,
+    pub ssd_wear_percent: Option<f64>,
+    pub gpu_temp_c: Option<f64>,
+    pub ssd_temp_c: Option<f64>,
+    pub fan_rpm: Option<f64>,
 }
 
 impl MetricRecord {
@@ -668,6 +690,14 @@ pub struct MetricSnapshot {
     pub freeze_events: i64,
     pub black_frame_ratio: f64,
     pub signature_deviation: f64,
+    pub power_watts: Option<f64>,
+    pub ups_runtime_minutes: Option<f64>,
+    pub ups_charge_percent: Option<f64>,
+    pub ups_status: Option<String>,
+    pub ssd_wear_percent: Option<f64>,
+    pub gpu_temp_c: Option<f64>,
+    pub ssd_temp_c: Option<f64>,
+    pub fan_rpm: Option<f64>,
 }
 
 impl MetricSnapshot {
@@ -688,6 +718,14 @@ impl MetricSnapshot {
             freeze_events: row.get("freeze_events")?,
             black_frame_ratio: row.get("black_frame_ratio")?,
             signature_deviation: row.get("signature_deviation")?,
+            power_watts: row.get("power_watts")?,
+            ups_runtime_minutes: row.get("ups_runtime_minutes")?,
+            ups_charge_percent: row.get("ups_charge_percent")?,
+            ups_status: row.get("ups_status")?,
+            ssd_wear_percent: row.get("ssd_wear_percent")?,
+            gpu_temp_c: row.get("gpu_temp_c")?,
+            ssd_temp_c: row.get("ssd_temp_c")?,
+            fan_rpm: row.get("fan_rpm")?,
         })
     }
 }
@@ -761,6 +799,36 @@ impl DashboardGenerator {
                     last.signature_deviation
                 ));
             }
+            if let Some(power) = last.power_watts {
+                if power > 120.0 {
+                    alerts.push(format!("Consumo elevado ({power:.1} W)"));
+                }
+            }
+            if let Some(charge) = last.ups_charge_percent {
+                if charge < 20.0 {
+                    alerts.push(format!("UPS com carga baixa ({charge:.0}%)"));
+                }
+            }
+            if let Some(runtime) = last.ups_runtime_minutes {
+                if runtime < 5.0 {
+                    alerts.push(format!("Autonomia UPS crítica ({runtime:.1} min)"));
+                }
+            }
+            if let Some(wear) = last.ssd_wear_percent {
+                if wear > 80.0 {
+                    alerts.push(format!("SSD desgaste elevado ({wear:.0}% usado)"));
+                }
+            }
+            if let Some(gpu_temp) = last.gpu_temp_c {
+                if gpu_temp > 85.0 {
+                    alerts.push(format!("Temperatura GPU alta ({gpu_temp:.1} °C)"));
+                }
+            }
+            if let Some(ssd_temp) = last.ssd_temp_c {
+                if ssd_temp > 70.0 {
+                    alerts.push(format!("SSD superaquecido ({ssd_temp:.1} °C)"));
+                }
+            }
         }
         alerts
     }
@@ -772,6 +840,43 @@ impl DashboardGenerator {
         alerts: &[String],
     ) -> String {
         let summary_rows = if let Some(snapshot) = latest {
+            let power_display = snapshot
+                .power_watts
+                .map(|value| format!("{value:.1} W"))
+                .unwrap_or_else(|| "—".into());
+            let ups_display = {
+                let mut parts = Vec::new();
+                if let Some(charge) = snapshot.ups_charge_percent {
+                    parts.push(format!("{charge:.0}%"));
+                }
+                if let Some(runtime) = snapshot.ups_runtime_minutes {
+                    parts.push(format!("{runtime:.1} min"));
+                }
+                if let Some(status) = &snapshot.ups_status {
+                    parts.push(status.clone());
+                }
+                if parts.is_empty() {
+                    "—".into()
+                } else {
+                    parts.join(" / ")
+                }
+            };
+            let ssd_wear_display = snapshot
+                .ssd_wear_percent
+                .map(|value| format!("{value:.0}% usado"))
+                .unwrap_or_else(|| "—".into());
+            let fan_display = snapshot
+                .fan_rpm
+                .map(|rpm| format!("{rpm:.0} RPM"))
+                .unwrap_or_else(|| "—".into());
+            let gpu_temp_display = snapshot
+                .gpu_temp_c
+                .map(|value| format!("{value:.1} °C"))
+                .unwrap_or_else(|| "—".into());
+            let ssd_temp_display = snapshot
+                .ssd_temp_c
+                .map(|value| format!("{value:.1} °C"))
+                .unwrap_or_else(|| "—".into());
             format!(
                 concat!(
                     "<tr><th>Timestamp</th><td>{}</td></tr>",
@@ -785,7 +890,13 @@ impl DashboardGenerator {
                     "<tr><th>Freeze</th><td>{}</td></tr>",
                     "<tr><th>Signature Δ</th><td>{:.2}</td></tr>",
                     "<tr><th>CPU</th><td>{:.1}%</td></tr>",
-                    "<tr><th>Temp.</th><td>{:.1} °C</td></tr>"
+                    "<tr><th>Temp.</th><td>{:.1} °C</td></tr>",
+                    "<tr><th>Power</th><td>{}</td></tr>",
+                    "<tr><th>UPS</th><td>{}</td></tr>",
+                    "<tr><th>SSD Wear</th><td>{}</td></tr>",
+                    "<tr><th>Fan RPM</th><td>{}</td></tr>",
+                    "<tr><th>GPU Temp</th><td>{}</td></tr>",
+                    "<tr><th>SSD Temp</th><td>{}</td></tr>"
                 ),
                 snapshot.timestamp.to_rfc3339(),
                 snapshot.buffer_duration_h,
@@ -798,7 +909,13 @@ impl DashboardGenerator {
                 snapshot.freeze_events,
                 snapshot.signature_deviation,
                 snapshot.avg_cpu_load,
-                snapshot.avg_temp_c
+                snapshot.avg_temp_c,
+                power_display,
+                ups_display,
+                ssd_wear_display,
+                fan_display,
+                gpu_temp_display,
+                ssd_temp_display
             )
         } else {
             "<tr><td colspan=2>Sem dados</td></tr>".to_string()

@@ -76,10 +76,11 @@ fn begin_playback_prefers_priority_and_music_ratio() {
         .unwrap();
 
     // Mark the first item as played recently to trigger music preference.
-    store
+    let second = store
         .begin_playback(&policy)
         .unwrap()
-        .map(|entry| assert_eq!(entry.plan_id, "music"));
+        .expect("expected music entry");
+    assert_eq!(second.plan_id, "music");
 }
 
 #[test]

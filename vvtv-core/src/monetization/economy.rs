@@ -353,9 +353,7 @@ impl EconomyStore {
             let event_type: String = row.get(0)?;
             let total: f64 = row.get::<_, Option<f64>>(1)?.unwrap_or(0.0);
             let count: i64 = row.get::<_, Option<i64>>(2)?.unwrap_or(0);
-            let kind = event_type
-                .parse()
-                .unwrap_or_else(|_| EconomyEventType::View);
+            let kind = event_type.parse().unwrap_or(EconomyEventType::View);
             totals.insert(kind, total);
             total_events += count as usize;
         }

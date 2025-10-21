@@ -12,6 +12,7 @@
 pub mod broadcaster;
 pub mod browser;
 pub mod business_logic;
+pub mod compliance;
 pub mod config;
 pub mod curation;
 pub mod distribution;
@@ -47,6 +48,12 @@ pub use business_logic::{
     Knobs as BusinessKnobs, Kpis as BusinessKpis, Result as BusinessLogicResult,
     Scheduling as BusinessScheduling, SeedStrategy, Selection as BusinessSelection,
     SelectionMethod,
+};
+pub use compliance::{
+    ComplianceError, ComplianceResult, ComplianceSuite, ComplianceSuiteConfig, ComplianceSummary,
+    ConsentLogEntry, CsamHashEntry, CsamScanFinding, CsamScanReport, CsamScanner,
+    DrmDetectionConfig, DrmScanFinding, DrmScanReport, DrmScanner, LicenseAuditFinding,
+    LicenseAuditFindingKind, LicenseAuditReport, LicenseAuditSummary, LicenseAuditor,
 };
 pub use config::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,

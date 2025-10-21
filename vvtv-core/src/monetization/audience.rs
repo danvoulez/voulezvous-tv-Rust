@@ -367,16 +367,16 @@ impl AudienceStore {
         }
         let cells_per_row = 8u32;
         let cell_width = width / cells_per_row.max(1);
-        let rows = ((report.regions.len() as u32 + cells_per_row - 1) / cells_per_row).max(1);
+        let rows = (report.regions.len() as u32).div_ceil(cells_per_row).max(1);
         let cell_height = (height / rows).max(40);
-        let mut idx = 0u32;
         let max_sessions = report
             .regions
             .iter()
             .map(|region| region.sessions as u32)
             .max()
             .unwrap_or(1);
-        for region in &report.regions {
+        for (idx, region) in report.regions.iter().enumerate() {
+            let idx = idx as u32;
             let x = (idx % cells_per_row) * cell_width;
             let y = (idx / cells_per_row) * cell_height;
             let intensity = (region.sessions as f32 / max_sessions as f32).clamp(0.0, 1.0);
@@ -390,7 +390,6 @@ impl AudienceStore {
                     image.put_pixel(px, py, color);
                 }
             }
-            idx += 1;
         }
         image.save(output.as_ref())?;
         Ok(output.as_ref().to_path_buf())

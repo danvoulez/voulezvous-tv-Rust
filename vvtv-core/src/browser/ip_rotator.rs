@@ -130,16 +130,15 @@ mod tests {
     #[cfg(windows)]
     use std::os::windows::process::ExitStatusExt;
 
+    type RecordedCalls = Arc<Mutex<Vec<(PathBuf, Vec<String>)>>>;
+
     struct RecordingExecutor {
-        calls: Arc<Mutex<Vec<(PathBuf, Vec<String>)>>>,
+        calls: RecordedCalls,
     }
 
     impl RecordingExecutor {
-        fn new() -> (
-            Arc<dyn CommandExecutor>,
-            Arc<Mutex<Vec<(PathBuf, Vec<String>)>>>,
-        ) {
-            let calls = Arc::new(Mutex::new(Vec::new()));
+        fn build() -> (Arc<dyn CommandExecutor>, RecordedCalls) {
+            let calls: RecordedCalls = Arc::new(Mutex::new(Vec::new()));
             let executor: Arc<dyn CommandExecutor> = Arc::new(Self {
                 calls: Arc::clone(&calls),
             });
@@ -167,7 +166,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let (executor, calls) = RecordingExecutor::new();
+        let (executor, calls) = RecordingExecutor::build();
         let mut rotator = IpRotator::new(
             IpRotationSection {
                 enabled: true,

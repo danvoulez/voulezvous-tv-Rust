@@ -223,7 +223,7 @@ impl ReplicationManager {
             (total_differences as f64 / total_files as f64) * 100.0
         };
         Ok(ReplicationCheckReport {
-            path: self.sync_paths.get(0).cloned().unwrap_or_default(),
+            path: self.sync_paths.first().cloned().unwrap_or_default(),
             differences: total_differences,
             total_files,
             drift_percent,
@@ -234,8 +234,7 @@ impl ReplicationManager {
 
     async fn trigger_failover(&self, script: &Path) -> Result<(), ReplicationError> {
         let mut command = Command::new(script);
-        let parts = vec![script.to_string_lossy().into_owned()];
-        let cmd_string = parts.join(" ");
+        let cmd_string = script.to_string_lossy().into_owned();
         let output = self
             .executor
             .run(&mut command)
@@ -353,7 +352,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .pop()
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no output"))
+                .ok_or_else(|| std::io::Error::other("no output"))
         }
     }
 

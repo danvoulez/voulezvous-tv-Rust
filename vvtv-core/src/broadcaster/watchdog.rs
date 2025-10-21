@@ -286,6 +286,7 @@ impl Watchdog {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct SelfcheckReport {
     #[serde(default)]
     timestamp: Option<DateTime<Utc>>,

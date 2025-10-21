@@ -22,7 +22,7 @@ use commands::compliance::{
     ComplianceAuditArgs, ComplianceCommands, ComplianceCsamArgs, ComplianceDrmArgs,
     ComplianceSuiteArgs,
 };
-use commands::discover::DiscoverArgs;
+use commands::{discover::DiscoverArgs, incident::IncidentReportArgs};
 use rusqlite::{Connection, OpenFlags};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
@@ -35,16 +35,17 @@ use vvtv_core::{
     ComplianceError, ComplianceSuite, ComplianceSuiteConfig, ComplianceSummary, ConfigBundle,
     ContentSearcher, CsamScanReport, CsamScanner, DashboardArtifacts, DashboardError,
     DashboardGenerator, DiscoveryConfig, DiscoveryLoop, DiscoveryPbd, DiscoveryPlanStore,
-    DiscoveryStats, DrmDetectionConfig, DrmScanReport, DrmScanner, EconomyError, EconomyEvent,
-    EconomyEventType, EconomyStore, EconomyStoreBuilder, EconomySummary, LedgerExport,
-    LicenseAuditReport, LicenseAuditor, MetricRecord, MetricsStore, MicroSpotContract,
-    MicroSpotInjection, MicroSpotManager, MonetizationDashboard, MonitorError, NewEconomyEvent,
-    NewViewerSession, Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord,
-    PlanMetrics, PlanStatus, PlayBeforeDownload, PlayoutQueueStore, ProfileManager, QaMetricsStore,
-    QaStatistics, QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics,
-    QueueStatus, SearchConfig, SearchEngine, SearchSessionFactory, SessionRecorder,
-    SessionRecorderConfig, SmokeMode, SmokeTestOptions, SmokeTestResult, SqlitePlanStore,
-    ViewerSession,
+    DiscoveryStats, DispatchAction, DispatchStatus, DrmDetectionConfig, DrmScanReport, DrmScanner,
+    EconomyError, EconomyEvent, EconomyEventType, EconomyStore, EconomyStoreBuilder, EconomySummary,
+    IncidentDispatch, IncidentError, IncidentHistoryWriter, IncidentNotifier, IncidentReport,
+    IncidentSeverity, LedgerExport, LicenseAuditReport, LicenseAuditor, MetricRecord, MetricsStore,
+    MicroSpotContract, MicroSpotInjection, MicroSpotManager, MonetizationDashboard, MonitorError,
+    NewEconomyEvent, NewViewerSession, Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry,
+    PlanImportRecord, PlanMetrics, PlanStatus, PlayBeforeDownload, PlayoutQueueStore,
+    ProfileManager, QaMetricsStore, QaStatistics, QueueEntry as QueueStoreEntry, QueueError,
+    QueueFilter, QueueMetrics, QueueStatus, SearchConfig, SearchEngine, SearchSessionFactory,
+    SessionRecorder, SessionRecorderConfig, SmokeMode, SmokeTestOptions, SmokeTestResult,
+    SqlitePlanStore, ViewerSession,
 };
 
 #[cfg(test)]
@@ -85,6 +86,8 @@ pub enum AppError {
     Spots(#[from] vvtv_core::SpotsError),
     #[error("compliance error: {0}")]
     Compliance(#[from] ComplianceError),
+    #[error("incident error: {0}")]
+    Incident(#[from] IncidentError),
     #[error("authentication failed")]
     Authentication,
     #[error("required resource missing: {0}")]
@@ -186,6 +189,9 @@ pub enum Commands {
     /// Operações de monetização e analytics
     #[command(subcommand)]
     Monetization(MonetizationCommands),
+    /// Comunicação e registro de incidentes
+    #[command(subcommand)]
+    Incident(IncidentCommands),
 }
 
 #[derive(Subcommand, Debug)]
@@ -472,6 +478,72 @@ pub struct DashboardResultView {
     pub artifacts: DashboardArtifacts,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct IncidentReportResultView {
+    pub incident_id: String,
+    pub severity: String,
+    pub markdown_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notification: Option<IncidentDispatchView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct IncidentDispatchView {
+    pub subject: String,
+    pub severity: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub actions: Vec<IncidentDispatchActionView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct IncidentDispatchActionView {
+    pub channel: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl From<IncidentDispatch> for IncidentDispatchView {
+    fn from(dispatch: IncidentDispatch) -> Self {
+        let actions = dispatch
+            .actions
+            .iter()
+            .map(IncidentDispatchActionView::from)
+            .collect();
+        Self {
+            subject: dispatch.subject,
+            severity: dispatch.severity.badge().to_string(),
+            message: Some(dispatch.message),
+            actions,
+        }
+    }
+}
+
+impl From<&DispatchAction> for IncidentDispatchActionView {
+    fn from(action: &DispatchAction) -> Self {
+        match &action.status {
+            DispatchStatus::Executed { detail } => Self {
+                channel: action.channel.to_string(),
+                status: "executed".to_string(),
+                detail: detail.clone(),
+            },
+            DispatchStatus::Skipped { reason } => Self {
+                channel: action.channel.to_string(),
+                status: "skipped".to_string(),
+                detail: Some(reason.clone()),
+            },
+            DispatchStatus::Failed { reason } => Self {
+                channel: action.channel.to_string(),
+                status: "failed".to_string(),
+                detail: Some(reason.clone()),
+            },
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum MonetizationCommands {
     /// Operações no ledger econômico
@@ -487,6 +559,12 @@ pub enum MonetizationCommands {
     Spots(SpotCommands),
     /// Gera dashboard HTML/JSON de monetização
     Dashboard(DashboardArgs),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum IncidentCommands {
+    /// Gera relatório de incidente e dispara comunicações configuradas
+    Report(IncidentReportArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -802,6 +880,12 @@ pub fn run(cli: Cli) -> Result<()> {
             },
             MonetizationCommands::Dashboard(args) => {
                 let result = context.generate_dashboard(args)?;
+                render(&result, cli.format)?;
+            }
+        },
+        Commands::Incident(command) => match command {
+            IncidentCommands::Report(args) => {
+                let result = context.incident_report(args)?;
                 render(&result, cli.format)?;
             }
         },
@@ -1613,6 +1697,67 @@ impl AppContext {
             .unwrap_or_else(|| self.monetization_reports_dir());
         let artifacts = dashboard.generate(&output_dir, Utc::now())?;
         Ok(DashboardResultView { artifacts })
+    }
+
+    fn incident_report(&self, args: &IncidentReportArgs) -> Result<IncidentReportResultView> {
+        let severity: IncidentSeverity = args.severity.into();
+        let detected_at = args.detected_at.unwrap_or_else(Utc::now);
+        let report = IncidentReport {
+            incident_id: args.id.clone(),
+            title: args.title.clone(),
+            severity,
+            category: args.category.clone(),
+            detected_at,
+            resolved_at: args.resolved_at,
+            summary: args.summary.clone(),
+            impact: args.impact.clone(),
+            root_cause: args.root_cause.clone(),
+            lessons_learned: args.lessons.clone(),
+            actions_taken: args.actions.clone(),
+            preventive_actions: args.preventive.clone(),
+            timeline: args.timeline.clone(),
+            author: args.author.clone(),
+        };
+
+        let fallback_dir =
+            PathBuf::from(&self.bundle.vvtv.paths.vault_dir).join("incident_history");
+        let configured_dir = self.bundle.vvtv.communications.history_dir(&fallback_dir);
+        let history_dir = args
+            .history_dir
+            .clone()
+            .unwrap_or_else(|| configured_dir.to_path_buf());
+        let writer = IncidentHistoryWriter::new(&history_dir);
+        let record = writer.write(&report, args.include_json)?;
+
+        let mut notification_view = None;
+        if !args.no_notify {
+            let mut notification = report.notification();
+            let link = args
+                .link
+                .clone()
+                .unwrap_or_else(|| record.markdown_path.display().to_string());
+            notification.link = Some(link);
+            let comms = &self.bundle.vvtv.communications;
+            let notifier = IncidentNotifier::new(
+                comms.routing.clone(),
+                comms.telegram.clone(),
+                comms.email.clone(),
+            )
+            .with_dry_run(args.dry_run);
+            let dispatch = notifier.notify(&notification)?;
+            notification_view = Some(dispatch.into());
+        }
+
+        Ok(IncidentReportResultView {
+            incident_id: report.incident_id,
+            severity: severity.badge().to_string(),
+            markdown_path: record.markdown_path.display().to_string(),
+            json_path: record
+                .json_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            notification: notification_view,
+        })
     }
 
     fn health_dashboard(&self, args: &HealthDashboardArgs) -> Result<AckMessage> {
@@ -2717,6 +2862,32 @@ impl DisplayFallback for LicenseAuditReport {
             for (kind, count) in entries {
                 lines.push(format!("  • {:?}: {}", kind, count));
             }
+impl DisplayFallback for IncidentReportResultView {
+    fn display(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Incidente {} [{}]",
+            self.incident_id, self.severity
+        ));
+        lines.push(format!("Postmortem: {}", self.markdown_path));
+        if let Some(json) = &self.json_path {
+            lines.push(format!("JSON: {json}"));
+        }
+        match &self.notification {
+            Some(notification) => {
+                lines.push(format!("Notificação: {}", notification.subject));
+                for action in &notification.actions {
+                    if let Some(detail) = &action.detail {
+                        lines.push(format!(
+                            "- {} -> {} ({detail})",
+                            action.channel, action.status
+                        ));
+                    } else {
+                        lines.push(format!("- {} -> {}", action.channel, action.status));
+                    }
+                }
+            }
+            None => lines.push("Notificação: não enviada".to_string()),
         }
         lines.join("\n")
     }
@@ -2823,11 +2994,12 @@ impl DisplayFallback for ComplianceSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::incident::IncidentSeverityArg;
     use chrono::{Duration, Utc};
     use rusqlite::params;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
-    use vvtv_core::BrowserMetrics;
+    use vvtv_core::{BrowserMetrics, IncidentTimelineEntry};
 
     fn prepare_test_context() -> Result<(TempDir, AppContext)> {
         let temp = TempDir::new().unwrap();
@@ -2979,6 +3151,38 @@ mod tests {
 
         let context = AppContext::new(&cli)?;
         Ok((temp, context))
+    }
+
+    #[test]
+    fn incident_report_generates_history() {
+        let (temp, context) = prepare_test_context().unwrap();
+        let history_dir = temp.path().join("history");
+        let args = IncidentReportArgs {
+            id: "INC-TEST".to_string(),
+            title: "Teste de incidente".to_string(),
+            severity: IncidentSeverityArg::High,
+            category: "Operacional".to_string(),
+            summary: "Buffer em nível baixo".to_string(),
+            impact: "Transmissão impactada por 2 minutos".to_string(),
+            root_cause: "Manutenção programada".to_string(),
+            detected_at: Some(Utc::now()),
+            resolved_at: Some(Utc::now()),
+            actions: vec!["Ativar emergency loop".to_string()],
+            lessons: vec!["Monitorar janelas de manutenção".to_string()],
+            preventive: vec!["Avisar equipe com antecedência".to_string()],
+            timeline: vec![IncidentTimelineEntry::new(Utc::now(), "Alerta emitido")],
+            author: Some("Eng. Operações".to_string()),
+            link: None,
+            history_dir: Some(history_dir.clone()),
+            no_notify: false,
+            dry_run: true,
+            include_json: true,
+        };
+        let result = context.incident_report(&args).unwrap();
+        assert!(Path::new(&result.markdown_path).exists());
+        assert!(result.notification.is_some());
+        let json_path = result.json_path.as_ref().expect("json should exist");
+        assert!(Path::new(json_path).exists());
     }
 
     #[test]

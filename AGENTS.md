@@ -1553,7 +1553,14 @@ Este AGENTS.md é um guia de implementação, mas o **VVTV INDUSTRIAL DOSSIER.md
 
 ## 🚦 STATUS TRACKING
 
-Ao implementar, mantenha um checklist de status:
+### Epic D — PRs D7–D11 (implementados)
+- **D7 Discovery Loop**: `ContentSearcher`, `DiscoveryLoop` e `vvtvctl discover` gerando PLANs auditáveis.
+- **D8 Resiliência antibot**: `FingerprintMasker`, retries categorizados e rotação de proxy (`retry.rs`, `ip_rotator.rs`).
+- **D9 QA tooling**: `MetricsStore`/`DashboardGenerator`, comandos `qa smoke-test|report` e roteiro `docs/qa/nightly-smoke.md`.
+- **D10 Performance**: fallback VideoToolbox, conexões SQLite em WAL e `scripts/optimize_databases.sh`.
+- **D11 Documentação**: README, Tasklist, AGENTS e Dossiê alinhados ao roadmap atualizado.
+
+> Continue usando checklists locais (ex: abaixo) para fases restantes do projeto:
 
 ```markdown
 ## Implementation Status
@@ -1581,6 +1588,7 @@ Ao implementar, mantenha um checklist de status:
 
 ... (continue para todas as fases)
 ```
+
 
 ---
 

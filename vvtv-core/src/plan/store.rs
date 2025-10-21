@@ -321,6 +321,31 @@ impl SqlitePlanStore {
         Ok(())
     }
 
+    pub fn mark_edited(
+        &self,
+        plan_id: &str,
+        hd_missing: bool,
+        resolution: Option<&str>,
+    ) -> PlanResult<()> {
+        let conn = self.open()?;
+        let affected = conn.execute(
+            "UPDATE plans
+             SET status = 'edited',
+                 hd_missing = CASE WHEN ?2 THEN 1 ELSE 0 END,
+                 resolution_observed = COALESCE(?3, resolution_observed),
+                 updated_at = CURRENT_TIMESTAMP,
+                 failure_count = 0
+             WHERE plan_id = ?1",
+            params![plan_id, hd_missing, resolution],
+        )?;
+        if affected == 0 {
+            return Err(PlanError::NotFound {
+                plan_id: plan_id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
     pub fn finalize_ready(&self, plan_id: &str) -> PlanResult<()> {
         self.update_status(plan_id, PlanStatus::Ready)
     }

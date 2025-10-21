@@ -119,42 +119,42 @@
 ---
 
 ## Epic E — Processor & Media Engineering (T-4h)
-- [ ] **PR E1 — Reabrir página e confirmar rendition no T-4h**
-  - [ ] Reutilizar automação PBD para revalidação (planos `selected`).
-  - [ ] Garantir captura da playlist correta (media playlist atual, representation ativa).
-  - [ ] Registrar fallback para 720p com flag `hd_missing`.
-  - [ ] Validar playback (buffer ≥3s, videoWidth/Height coerente).
-- [ ] **PR E2 — Implementar pipeline de download (HLS/DASH/progressivo)**
-  - [ ] Gerar staging `/vvtv/cache/tmp_downloads/<plan_id>/source`.
-  - [ ] Baixar media playlist + segments (aria2 parallel) e reescrever caminhos locais.
-  - [ ] Suporte a DASH (`SegmentTemplate`, `SegmentList`) com opcional remux para HLS.
-  - [ ] Progressivo: HEAD check (Content-Length ≥2MB), GET com resume.
-  - [ ] Validar integridade (sequência, duração, checksums).
-- [ ] **PR E3 — Decisor remux vs transcode**
-  - [ ] Detectar codecs compatíveis (`avc1`, `aac`) para `-c copy`.
-  - [ ] Remux HLS/MP4 para mezzanine (`master.mp4`) com `+faststart`.
-  - [ ] Se incompatível, enfileirar transcode total.
-  - [ ] Registrar decisão no `manifest.json`.
-- [ ] **PR E4 — Transcode & loudnorm**
-  - [ ] Transcode libx264 (preset slow/fast adaptativo, keyint 120, vbv config).
-  - [ ] Normalização áudio EBU R128 (two-pass) com `loudnorm` e equalização cinema noturno.
-  - [ ] Gerar variantes HLS 720p/480p (fmp4, independent segments).
-  - [ ] Permitir packaging sem reencode (copy) quando possível.
-- [ ] **PR E5 — QC técnico e geração de artefatos**
-  - [ ] Rodar `ffprobe` e salvar `qc_pre.json` com resultados.
-  - [ ] Calcular `checksums.json` (SHA-256 por arquivo) e `manifest.json` consolidado.
-  - [ ] Atualizar `plans` (`edited`), inserir `playout_queue` (`queued`).
-  - [ ] Manter staging limpo (limpar tmp_downloads após sucesso).
-- [ ] **PR E6 — Tratamento de falhas e logging**
-  - [ ] Implementar retries configuráveis (3 tentativas, delays crescentes).
-  - [ ] Logar falhas em `/vvtv/system/logs/processor_failures.log` com motivos e ação tomada.
-  - [ ] Atualizar status `rejected`/`quarantine` com causa.
-  - [ ] Notificações de falhas críticas (Telegram/email opcional).
-- [ ] **PR E7 — Testes integrados de pipeline**
-  - [ ] Fluxo end-to-end em sandbox (input mock URLs → output HLS pronto).
-  - [ ] Testes de performance (2 downloads + 2 transcodes concorrentes).
-  - [ ] Testes de fallback (remux-only, transcode fallback, loudnorm off).
-  - [ ] Documentar resultados e métricas de throughput.
+- [x] **PR E1 — Reabrir página e confirmar rendition no T-4h**
+  - [x] Reutilizar automação PBD para revalidação (planos `selected`).
+  - [x] Garantir captura da playlist correta (media playlist atual, representation ativa).
+  - [x] Registrar fallback para 720p com flag `hd_missing`.
+  - [x] Validar playback (buffer ≥3s, videoWidth/Height coerente).
+- [x] **PR E2 — Implementar pipeline de download (HLS/DASH/progressivo)**
+  - [x] Gerar staging `/vvtv/cache/tmp_downloads/<plan_id>/source`.
+  - [x] Baixar media playlist + segments (aria2 parallel) e reescrever caminhos locais.
+  - [x] Suporte a DASH (`SegmentTemplate`, `SegmentList`) com opcional remux para HLS.
+  - [x] Progressivo: HEAD check (Content-Length ≥2MB), GET com resume.
+  - [x] Validar integridade (sequência, duração, checksums).
+- [x] **PR E3 — Decisor remux vs transcode**
+  - [x] Detectar codecs compatíveis (`avc1`, `aac`) para `-c copy`.
+  - [x] Remux HLS/MP4 para mezzanine (`master.mp4`) com `+faststart`.
+  - [x] Se incompatível, enfileirar transcode total.
+  - [x] Registrar decisão no `manifest.json`.
+- [x] **PR E4 — Transcode & loudnorm**
+  - [x] Transcode libx264 (preset slow/fast adaptativo, keyint 120, vbv config).
+  - [x] Normalização áudio EBU R128 (two-pass) com `loudnorm` e equalização cinema noturno.
+  - [x] Gerar variantes HLS 720p/480p (fmp4, independent segments).
+  - [x] Permitir packaging sem reencode (copy) quando possível.
+- [x] **PR E5 — QC técnico e geração de artefatos**
+  - [x] Rodar `ffprobe` e salvar `qc_pre.json` com resultados.
+  - [x] Calcular `checksums.json` (SHA-256 por arquivo) e `manifest.json` consolidado.
+  - [x] Atualizar `plans` (`edited`), inserir `playout_queue` (`queued`).
+  - [x] Manter staging limpo (limpar tmp_downloads após sucesso).
+- [x] **PR E6 — Tratamento de falhas e logging**
+  - [x] Implementar retries configuráveis (3 tentativas, delays crescentes).
+  - [x] Logar falhas em `/vvtv/system/logs/processor_failures.log` com motivos e ação tomada.
+  - [x] Atualizar status `rejected`/`quarantine` com causa.
+  - [x] Notificações de falhas críticas (Telegram/email opcional).
+- [x] **PR E7 — Testes integrados de pipeline**
+  - [x] Fluxo end-to-end em sandbox (input mock URLs → output HLS pronto).
+  - [x] Testes de performance (2 downloads + 2 transcodes concorrentes).
+  - [x] Testes de fallback (remux-only, transcode fallback, loudnorm off).
+  - [x] Documentar resultados e métricas de throughput.
 
 ---
 

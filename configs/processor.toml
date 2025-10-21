@@ -27,6 +27,7 @@ fallback_transcode = true
 
 [transcode]
 # Video
+use_hardware_accel = true
 codec = "libx264"
 preset = "slow"
 crf = 20

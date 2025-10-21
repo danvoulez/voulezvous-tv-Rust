@@ -312,6 +312,7 @@ pub struct RemuxSection {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TranscodeSection {
+    pub use_hardware_accel: bool,
     pub codec: String,
     pub preset: String,
     pub crf: u8,

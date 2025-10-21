@@ -17,6 +17,7 @@ pub mod monitor;
 pub mod plan;
 pub mod processor;
 pub mod queue;
+mod sqlite;
 
 pub use broadcaster::{
     failover::{FailoverError, FailoverManager},

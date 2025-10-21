@@ -9,6 +9,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use super::error::{BrowserError, BrowserResult};
+use crate::sqlite::configure_connection;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum BrowserErrorCategory {
@@ -203,7 +204,9 @@ impl AutomationTelemetry {
     }
 
     fn open_db(&self) -> Result<Connection, TelemetryError> {
-        Ok(Connection::open_with_flags(&self.db_path, self.flags)?)
+        let conn = Connection::open_with_flags(&self.db_path, self.flags)?;
+        configure_connection(&conn)?;
+        Ok(conn)
     }
 
     pub fn record_failure(&self, failure: &FailureContext) -> Result<(), TelemetryError> {

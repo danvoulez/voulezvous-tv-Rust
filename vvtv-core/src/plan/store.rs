@@ -5,6 +5,7 @@ use chrono::{TimeZone, Utc};
 use uuid::Uuid;
 
 use crate::browser::{Candidate, PbdOutcome};
+use crate::sqlite::configure_connection;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use super::models::{
@@ -84,12 +85,17 @@ impl SqlitePlanStore {
     }
 
     fn open(&self) -> PlanResult<Connection> {
-        Connection::open_with_flags(&self.path, self.flags).map_err(|source| {
+        let conn = Connection::open_with_flags(&self.path, self.flags).map_err(|source| {
             PlanError::OpenDatabase {
                 path: self.path.clone(),
                 source,
             }
-        })
+        })?;
+        configure_connection(&conn).map_err(|source| PlanError::OpenDatabase {
+            path: self.path.clone(),
+            source,
+        })?;
+        Ok(conn)
     }
 
     pub fn initialize(&self) -> PlanResult<()> {

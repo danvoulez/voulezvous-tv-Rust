@@ -2,6 +2,8 @@ mod error;
 mod types;
 
 use std::collections::HashMap;
+use std::env;
+use std::ffi::{OsStr, OsString};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -15,8 +17,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 use tokio::time::sleep;
-use tracing::warn;
+use tracing::{info, warn};
 use url::Url;
 
 use crate::browser::{BrowserAutomation, BrowserCaptureKind, PbdOutcome, PlayBeforeDownload};
@@ -403,7 +406,7 @@ impl Processor {
                 descriptor.container = "dash".into();
             }
             _ => {
-                self.write_transcode_stub(&master_path, downloaded).await?;
+                self.transcode_media(&master_path, downloaded).await?;
             }
         }
 
@@ -759,10 +762,130 @@ impl Processor {
         Ok(())
     }
 
+    async fn transcode_media(
+        &self,
+        path: &Path,
+        downloaded: &DownloadedMedia,
+    ) -> ProcessorResult<()> {
+        let Some((input, work_dir)) = self.transcode_input(downloaded) else {
+            self.write_transcode_stub(path, downloaded, None).await?;
+            return Ok(());
+        };
+
+        let command = self.build_transcode_command(&input, path);
+        let command_display = command.display();
+        let mut process = command.create();
+        if let Some(dir) = work_dir {
+            process.current_dir(dir);
+        }
+        process.kill_on_drop(true);
+        match process.status().await {
+            Ok(status) if status.success() => {
+                info!("transcode completed with command: {command_display}");
+                Ok(())
+            }
+            Ok(status) => {
+                warn!("ffmpeg exited with status {status:?}; falling back to transcode stub");
+                self.write_transcode_stub(path, downloaded, Some(&command_display))
+                    .await?;
+                Ok(())
+            }
+            Err(err) => {
+                warn!("failed to execute ffmpeg: {err}; writing transcode stub");
+                self.write_transcode_stub(path, downloaded, Some(&command_display))
+                    .await?;
+                Ok(())
+            }
+        }
+    }
+
+    fn transcode_input(&self, downloaded: &DownloadedMedia) -> Option<(PathBuf, Option<PathBuf>)> {
+        match downloaded {
+            DownloadedMedia::Progressive(progressive) => {
+                Some((progressive.file_path.clone(), None))
+            }
+            DownloadedMedia::Hls(hls) => {
+                let dir = hls
+                    .rewritten_playlist
+                    .parent()
+                    .map(|path| path.to_path_buf());
+                Some((hls.rewritten_playlist.clone(), dir))
+            }
+            DownloadedMedia::Dash(dash) => {
+                let dir = dash.manifest_path.parent().map(|path| path.to_path_buf());
+                Some((dash.manifest_path.clone(), dir))
+            }
+        }
+    }
+
+    fn build_transcode_command(&self, input: &Path, output: &Path) -> TranscodeCommand {
+        let mut command = TranscodeCommand::new("ffmpeg");
+        command.arg("-y");
+        command.arg("-hide_banner");
+        command.arg("-loglevel");
+        command.arg("error");
+
+        if self.should_use_hardware_accel() {
+            command.arg("-hwaccel");
+            command.arg("videotoolbox");
+        }
+
+        command.arg("-i");
+        command.arg(input.as_os_str());
+
+        let transcode = &self.processor_config.transcode;
+        if self.should_use_hardware_accel() {
+            command.arg("-c:v");
+            command.arg("h264_videotoolbox");
+        } else {
+            command.arg("-c:v");
+            command.arg(OsStr::new(&transcode.codec));
+            command.arg("-preset");
+            command.arg(OsStr::new(&transcode.preset));
+            command.arg("-crf");
+            command.arg(transcode.crf.to_string());
+            command.arg("-profile:v");
+            command.arg(OsStr::new(&transcode.profile));
+            command.arg("-level:v");
+            command.arg(OsStr::new(&transcode.level));
+        }
+
+        command.arg("-pix_fmt");
+        command.arg(OsStr::new(&transcode.pix_fmt));
+        command.arg("-g");
+        command.arg(transcode.keyint.to_string());
+        command.arg("-keyint_min");
+        command.arg(transcode.min_keyint.to_string());
+        command.arg("-sc_threshold");
+        command.arg(transcode.scenecut.to_string());
+        command.arg("-maxrate");
+        command.arg(OsStr::new(&transcode.vbv_maxrate));
+        command.arg("-bufsize");
+        command.arg(OsStr::new(&transcode.vbv_bufsize));
+        command.arg("-threads");
+        command.arg("0");
+
+        let profiles = &self.processor_config.profiles;
+        command.arg("-c:a");
+        command.arg("aac");
+        command.arg("-b:a");
+        command.arg(OsStr::new(&profiles.hls_720p.audio_bitrate));
+
+        command.arg("-movflags");
+        command.arg("+faststart");
+        command.arg(output.as_os_str());
+        command
+    }
+
+    fn should_use_hardware_accel(&self) -> bool {
+        self.processor_config.transcode.use_hardware_accel && detect_apple_silicon()
+    }
+
     async fn write_transcode_stub(
         &self,
         path: &Path,
         downloaded: &DownloadedMedia,
+        command: Option<&str>,
     ) -> ProcessorResult<()> {
         let mut file = fs::File::create(path)
             .await
@@ -770,7 +893,18 @@ impl Processor {
                 path: path.to_path_buf(),
                 source,
             })?;
-        let descriptor = format!("TRANSCODE-STUB {:?}\n", downloaded);
+        let mut descriptor = format!("TRANSCODE-STUB {:?}\n", downloaded);
+        descriptor.push_str(&format!(
+            "hardware_accel={}\n",
+            if self.should_use_hardware_accel() {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        ));
+        if let Some(command) = command {
+            descriptor.push_str(&format!("command={command}\n"));
+        }
         file.write_all(descriptor.as_bytes())
             .await
             .map_err(|source| ProcessorError::Io {
@@ -901,9 +1035,83 @@ struct HlsPlaylist {
 }
 
 #[derive(Debug, Clone)]
+struct TranscodeCommand {
+    program: OsString,
+    args: Vec<OsString>,
+}
+
+impl TranscodeCommand {
+    fn new(program: impl AsRef<OsStr>) -> Self {
+        Self {
+            program: program.as_ref().to_owned(),
+            args: Vec::new(),
+        }
+    }
+
+    fn arg(&mut self, value: impl AsRef<OsStr>) -> &mut Self {
+        self.args.push(value.as_ref().to_owned());
+        self
+    }
+
+    fn create(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(self.args.iter().map(|arg| arg.as_os_str()));
+        command
+    }
+
+    fn display(&self) -> String {
+        let program = self.program.to_string_lossy();
+        let joined = self
+            .args
+            .iter()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if joined.is_empty() {
+            program.into_owned()
+        } else {
+            format!("{program} {joined}")
+        }
+    }
+}
+
+fn detect_apple_silicon() -> bool {
+    if env::var_os("VVTV_FORCE_APPLE_SILICON").is_some() {
+        return true;
+    }
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    {
+        true
+    }
+    #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
+    {
+        false
+    }
+}
+
+#[derive(Debug, Clone)]
 struct HlsSegment {
     duration: f64,
     uri: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detect_apple_silicon;
+
+    #[test]
+    fn detect_apple_silicon_respects_override() {
+        std::env::set_var("VVTV_FORCE_APPLE_SILICON", "1");
+        assert!(detect_apple_silicon());
+        std::env::remove_var("VVTV_FORCE_APPLE_SILICON");
+    }
+
+    #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
+    #[test]
+    fn detect_apple_silicon_false_on_non_mac() {
+        std::env::remove_var("VVTV_FORCE_APPLE_SILICON");
+        assert!(!detect_apple_silicon());
+    }
 }
 
 impl HlsPlaylist {

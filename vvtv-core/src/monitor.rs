@@ -6,6 +6,8 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::sqlite::configure_connection;
+
 const METRICS_SCHEMA: &str = include_str!("../../sql/metrics.sql");
 
 #[derive(Debug, Error)]
@@ -38,10 +40,17 @@ impl MetricsStore {
     }
 
     fn open(&self) -> Result<Connection, MonitorError> {
-        Connection::open_with_flags(&self.path, self.flags).map_err(|source| MonitorError::Open {
+        let conn = Connection::open_with_flags(&self.path, self.flags).map_err(|source| {
+            MonitorError::Open {
+                source,
+                path: self.path.clone(),
+            }
+        })?;
+        configure_connection(&conn).map_err(|source| MonitorError::Open {
             source,
             path: self.path.clone(),
-        })
+        })?;
+        Ok(conn)
     }
 
     pub fn initialize(&self) -> Result<(), MonitorError> {

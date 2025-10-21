@@ -105,16 +105,26 @@
   - [x] Sanitizar strings (remover emojis, espaços múltiplos, query params tracking).
   - [x] Calcular `expected_bitrate`, `duration_est_s`, `license_hint`.
   - [x] Armazenar no `Plan` e atualizar métricas (`pages_per_hour`, `hd_hit_rate`).
-- [ ] **PR D5 — Error handling & antibot resilience**
-  - [ ] Categorizar erros (player não encontrado, HD indisponível, bloqueio, manifest inválido).
-  - [ ] Implementar retries com backoff (10min → 45min → 24h blacklist).
-  - [ ] Trocar IP/proxy automaticamente em caso de bloqueio.
-  - [ ] Registrar incidentes em log dedicado (`curator_failures.log`).
-- [ ] **PR D6 — QA tooling para browser**
-  - [ ] Scripts headless/headed para smoke test por domínio.
-  - [ ] Captura de vídeos/frames das interações para inspeção.
-  - [ ] Métricas no `metrics.sqlite` (`pbd_success_rate`, `proxy_rotations`).
-  - [ ] Documentação de testes (passo-a-passo QA noturno).
+- [x] **PR D5 — Error handling & antibot resilience**
+  - [x] Categorizar erros (player não encontrado, HD indisponível, bloqueio, manifest inválido).
+  - [x] Implementar retries com backoff (10min → 45min → 24h blacklist).
+  - [x] Trocar IP/proxy automaticamente em caso de bloqueio.
+  - [x] Registrar incidentes em log dedicado (`curator_failures.log`).
+- [x] **PR D6 — QA tooling para browser**
+  - [x] Scripts headless/headed para smoke test por domínio.
+  - [x] Captura de vídeos/frames das interações para inspeção.
+  - [x] Métricas no `metrics.sqlite` (`pbd_success_rate`, `proxy_rotations`).
+  - [x] Documentação de testes (passo-a-passo QA noturno).
+- [x] **PR D7 — Discovery Loop completo**
+  - [x] ContentSearcher multi-engine com heurísticas de vídeo e filtragem de domínio.
+  - [x] DiscoveryLoop com rate limiting, estatísticas e modo dry-run.
+  - [x] CLI `vvtvctl discover` com parâmetros configuráveis e auditoria em `plans.sqlite`.
+- [x] **PR D8 — Resiliência anti-bot (consolidado em D5)**
+  - [x] Fingerprint masking avançado (canvas, WebGL, áudio) em produção.
+  - [x] Rotação de IP integrada ao loop de retries.
+- [x] **PR D9 — Ferramental de QA (consolidado em D6)**
+  - [x] Smoke runner noturno, gravação de sessões e dashboards HTML para inspeção.
+  - [x] Relatórios persistidos em `metrics.sqlite` e guias de operação sincronizados.
 
 ---
 

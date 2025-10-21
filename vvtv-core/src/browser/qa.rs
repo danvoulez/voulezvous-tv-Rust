@@ -17,6 +17,7 @@ use super::error_handler::{telemetry_run, AutomationTelemetry};
 use super::metrics::BrowserMetrics;
 use super::pbd::{CollectOptions, PbdOutcome, PlayBeforeDownload};
 use super::retry::RetryPolicy;
+use crate::sqlite::configure_connection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 pub enum SmokeMode {
@@ -419,7 +420,9 @@ impl QaMetricsStore {
     }
 
     fn connection(&self) -> Result<Connection, BrowserError> {
-        Connection::open(&self.path).map_err(|err| BrowserError::Qa(err.to_string()))
+        let conn = Connection::open(&self.path).map_err(|err| BrowserError::Qa(err.to_string()))?;
+        configure_connection(&conn).map_err(|err| BrowserError::Qa(err.to_string()))?;
+        Ok(conn)
     }
 
     pub fn summarize(&self) -> BrowserResult<QaStatistics> {

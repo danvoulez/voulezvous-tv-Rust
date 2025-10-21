@@ -58,4 +58,64 @@ CREATE TABLE IF NOT EXISTS proxy_rotations (
 
 CREATE INDEX IF NOT EXISTS idx_proxy_rotations_ts ON proxy_rotations(ts DESC);
 
+CREATE TABLE IF NOT EXISTS replication_syncs (
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    path TEXT,
+    bytes_transferred INTEGER,
+    duration_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_replication_syncs_ts ON replication_syncs(ts DESC);
+
+CREATE TABLE IF NOT EXISTS replication_events (
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    path TEXT,
+    differences INTEGER,
+    total_files INTEGER,
+    drift_percent REAL,
+    failover_triggered INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_replication_events_ts ON replication_events(ts DESC);
+
+CREATE TABLE IF NOT EXISTS cdn_metrics (
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    provider TEXT,
+    cdn_hits INTEGER,
+    latency_avg_ms REAL,
+    cache_hit_rate REAL,
+    origin_errors INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_cdn_metrics_ts ON cdn_metrics(ts DESC);
+
+CREATE TABLE IF NOT EXISTS backup_syncs (
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    provider TEXT,
+    files_uploaded INTEGER,
+    bytes_uploaded INTEGER,
+    removed_segments TEXT,
+    duration_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_backup_syncs_ts ON backup_syncs(ts DESC);
+
+CREATE TABLE IF NOT EXISTS edge_latency (
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    region TEXT,
+    target TEXT,
+    latency_ms REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_edge_latency_ts ON edge_latency(ts DESC);
+
+CREATE TABLE IF NOT EXISTS cdn_tokens (
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    path TEXT,
+    token TEXT,
+    expires_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_cdn_tokens_ts ON cdn_tokens(ts DESC);
+
 COMMIT;

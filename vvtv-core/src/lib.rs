@@ -12,6 +12,7 @@
 pub mod broadcaster;
 pub mod browser;
 pub mod config;
+pub mod distribution;
 pub mod error;
 pub mod monitor;
 pub mod plan;
@@ -39,6 +40,22 @@ pub use browser::{
 pub use config::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
     BroadcasterConfig, BrowserConfig, ConfigBundle, ProcessorConfig, VvtvConfig,
+};
+pub use distribution::{
+    cdn::{
+        BackupCdnConfig, BackupCdnManager, BackupSyncReport, CdnCoordinator, CdnError, CdnMetrics,
+        PrimaryCdnConfig, PrimaryCdnManager,
+    },
+    edge::{
+        EdgeBufferStatus, EdgeConfig, EdgeError, EdgeLatencyRecord, EdgeOrchestrator, EdgeSummary,
+        SegmentSnapshot,
+    },
+    replicator::{
+        ReplicationCheckReport, ReplicationError, ReplicationManager, ReplicationReport,
+        ReplicationSyncReport,
+    },
+    security::{DistributionSecurity, DistributionSecurityError, SecurityConfig, SegmentToken},
+    DistributionCycleReport, DistributionError, DistributionManager,
 };
 pub use error::{ConfigError, Result};
 pub use monitor::{

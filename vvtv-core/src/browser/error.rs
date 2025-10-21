@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+#[allow(clippy::result_large_err)]
 pub type BrowserResult<T> = Result<T, BrowserError>;
 
 #[derive(Debug, Error)]
@@ -22,6 +23,14 @@ pub enum BrowserError {
     Metadata(String),
     #[error("qa script failure: {0}")]
     Qa(String),
+    #[error("telemetry error: {0}")]
+    Telemetry(String),
+    #[error("ip rotation failed: {0}")]
+    IpRotation(String),
+    #[error("screenshot capture failed: {0}")]
+    Screenshot(String),
+    #[error("session recording failed: {0}")]
+    SessionRecording(String),
     #[error("unexpected error: {0}")]
     Unexpected(String),
 }

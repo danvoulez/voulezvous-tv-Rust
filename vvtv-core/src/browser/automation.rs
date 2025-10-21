@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,14 +12,19 @@ use chromiumoxide::handler::viewport::Viewport as ChromiumViewport;
 use chromiumoxide::page::Page;
 use futures::StreamExt;
 use rand::{seq::SliceRandom, Rng};
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use crate::config::{BrowserConfig, ViewportSection};
 
 use super::error::{BrowserError, BrowserResult};
+use super::error_handler::AutomationTelemetry;
+use super::fingerprint::FingerprintMasker;
+use super::ip_rotator::IpRotator;
 use super::metrics::BrowserMetrics;
 use super::profile::{BrowserProfile, ProfileManager};
+use super::retry::RetryPolicy;
 
 #[derive(Debug, Clone)]
 pub struct ViewportSpec {
@@ -27,11 +33,34 @@ pub struct ViewportSpec {
     pub device_scale_factor: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+pub struct LaunchOverrides {
+    pub headless: Option<bool>,
+}
+
+#[derive(Debug)]
 pub struct BrowserLauncher {
     config: Arc<BrowserConfig>,
     profiles: ProfileManager,
     proxy_pool: ProxyPool,
+    fingerprint: Arc<FingerprintMasker>,
+    telemetry: Arc<AutomationTelemetry>,
+    retry_policy: RetryPolicy,
+    ip_rotator: Option<Arc<AsyncMutex<IpRotator>>>,
+}
+
+impl Clone for BrowserLauncher {
+    fn clone(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            profiles: self.profiles.clone(),
+            proxy_pool: self.proxy_pool.clone(),
+            fingerprint: Arc::clone(&self.fingerprint),
+            telemetry: Arc::clone(&self.telemetry),
+            retry_policy: self.retry_policy.clone(),
+            ip_rotator: self.ip_rotator.as_ref().map(Arc::clone),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -75,13 +104,46 @@ impl ProxyPool {
 }
 
 impl BrowserLauncher {
-    pub fn new(config: BrowserConfig, profiles: ProfileManager) -> Self {
+    pub fn new(config: BrowserConfig, profiles: ProfileManager) -> BrowserResult<Self> {
         let proxy_pool = ProxyPool::new(&config);
-        Self {
-            config: Arc::new(config),
+        let config = Arc::new(config);
+        let fingerprint = Arc::new(FingerprintMasker::new(config.fingerprint.clone()));
+        let failure_log = PathBuf::from(&config.observability.failure_log);
+        let metrics_db = PathBuf::from(&config.observability.metrics_db);
+        let telemetry = Arc::new(AutomationTelemetry::new(failure_log, metrics_db)?);
+        let retry_policy = RetryPolicy::new(config.retry.clone());
+        let ip_rotator = if config.ip_rotation.enabled && !config.ip_rotation.exit_nodes.is_empty()
+        {
+            let rotator = IpRotator::new(config.ip_rotation.clone(), Arc::clone(&telemetry))?;
+            Some(Arc::new(AsyncMutex::new(rotator)))
+        } else {
+            None
+        };
+        Ok(Self {
+            config,
             profiles,
             proxy_pool,
-        }
+            fingerprint,
+            telemetry,
+            retry_policy,
+            ip_rotator,
+        })
+    }
+
+    pub fn telemetry(&self) -> Arc<AutomationTelemetry> {
+        Arc::clone(&self.telemetry)
+    }
+
+    pub fn retry_policy(&self) -> RetryPolicy {
+        self.retry_policy.clone()
+    }
+
+    pub fn ip_rotator(&self) -> Option<Arc<AsyncMutex<IpRotator>>> {
+        self.ip_rotator.as_ref().map(Arc::clone)
+    }
+
+    pub fn fingerprint(&self) -> Arc<FingerprintMasker> {
+        Arc::clone(&self.fingerprint)
     }
 
     pub fn config(&self) -> &BrowserConfig {
@@ -93,6 +155,13 @@ impl BrowserLauncher {
     }
 
     pub async fn launch(&self) -> BrowserResult<BrowserAutomation> {
+        self.launch_with_overrides(LaunchOverrides::default()).await
+    }
+
+    pub async fn launch_with_overrides(
+        &self,
+        overrides: LaunchOverrides,
+    ) -> BrowserResult<BrowserAutomation> {
         self.profiles.cleanup_expired()?;
         let profile = self.profiles.allocate()?;
         let viewport = self.select_viewport();
@@ -102,10 +171,22 @@ impl BrowserLauncher {
         } else {
             None
         };
-
-        let chromium_config =
-            self.build_chromium_config(&profile, &viewport, &user_agent, proxy.as_deref())?;
-        info!(profile = %profile.id(), ua = %user_agent, width = viewport.width, height = viewport.height, "Launching Chromium instance");
+        let headless = overrides.headless.unwrap_or(self.config.chromium.headless);
+        let chromium_config = self.build_chromium_config(
+            &profile,
+            &viewport,
+            &user_agent,
+            proxy.as_deref(),
+            headless,
+        )?;
+        info!(
+            profile = %profile.id(),
+            ua = %user_agent,
+            width = viewport.width,
+            height = viewport.height,
+            headless,
+            "Launching Chromium instance"
+        );
 
         let (browser, mut handler) = Browser::launch(chromium_config)
             .await
@@ -130,6 +211,7 @@ impl BrowserLauncher {
             viewport,
             user_agent,
             proxy,
+            fingerprint: Arc::clone(&self.fingerprint),
         })
     }
 
@@ -174,6 +256,7 @@ impl BrowserLauncher {
         viewport: &ViewportSpec,
         user_agent: &str,
         proxy: Option<&str>,
+        headless: bool,
     ) -> BrowserResult<ChromiumConfig> {
         let mut builder = ChromiumConfig::builder()
             .chrome_executable(&self.config.chromium.executable_path)
@@ -187,7 +270,7 @@ impl BrowserLauncher {
                 has_touch: false,
             });
 
-        if !self.config.chromium.headless {
+        if !headless {
             builder = builder.with_head();
         }
         if !self.config.chromium.sandbox {
@@ -251,6 +334,7 @@ pub struct BrowserAutomation {
     viewport: ViewportSpec,
     user_agent: String,
     proxy: Option<String>,
+    fingerprint: Arc<FingerprintMasker>,
 }
 
 impl BrowserAutomation {
@@ -260,6 +344,10 @@ impl BrowserAutomation {
 
     pub fn metrics(&self) -> BrowserMetrics {
         self.metrics.lock().unwrap().clone()
+    }
+
+    pub(crate) fn metrics_handle(&self) -> Arc<Mutex<BrowserMetrics>> {
+        Arc::clone(&self.metrics)
     }
 
     pub fn viewport(&self) -> &ViewportSpec {
@@ -387,6 +475,7 @@ impl BrowserAutomation {
                 .map_err(BrowserError::Configuration)?,
         )
         .await?;
+        self.fingerprint.apply(page).await?;
         Ok(())
     }
 }

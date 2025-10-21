@@ -15,4 +15,36 @@ CREATE TABLE IF NOT EXISTS metrics (
 
 CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(ts DESC);
 
+CREATE TABLE IF NOT EXISTS curator_failures (
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    url TEXT,
+    category TEXT,
+    error_message TEXT,
+    attempt INTEGER,
+    proxy TEXT,
+    remediation TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_curator_failures_ts ON curator_failures(ts DESC);
+
+CREATE TABLE IF NOT EXISTS curator_runs (
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    scenario TEXT,
+    url TEXT,
+    success INTEGER,
+    duration_ms INTEGER,
+    screenshot_path TEXT,
+    video_path TEXT,
+    proxy_rotations INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_curator_runs_ts ON curator_runs(ts DESC);
+
+CREATE TABLE IF NOT EXISTS proxy_rotations (
+    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+    exit_node TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_rotations_ts ON proxy_rotations(ts DESC);
+
 COMMIT;

@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rand::Rng;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
 use chromiumoxide::element::Element;
-use chromiumoxide::page::Page;
+use chromiumoxide::page::{Page, ScreenshotParams};
 
 use crate::config::BrowserConfig;
 
@@ -14,8 +14,9 @@ use super::automation::{BrowserAutomation, BrowserContext};
 use super::error::{BrowserError, BrowserResult};
 use super::human::HumanMotionController;
 use super::metadata::{ContentMetadata, MetadataExtractor};
+use tracing::warn;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum BrowserCaptureKind {
     HlsMaster,
     HlsMediaPlaylist,
@@ -24,7 +25,7 @@ pub enum BrowserCaptureKind {
     Unknown,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BrowserCapture {
     pub url: String,
     pub kind: BrowserCaptureKind,
@@ -32,7 +33,7 @@ pub struct BrowserCapture {
     pub associated_requests: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PlaybackValidation {
     pub video_width: u32,
     pub video_height: u32,
@@ -43,11 +44,22 @@ pub struct PlaybackValidation {
     pub hd_label: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PbdOutcome {
     pub capture: BrowserCapture,
     pub validation: PlaybackValidation,
     pub metadata: ContentMetadata,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CollectOptions {
+    pub capture_screenshot: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct PbdArtifacts {
+    pub outcome: PbdOutcome,
+    pub screenshot: Option<Vec<u8>>,
 }
 
 pub struct PlayBeforeDownload {
@@ -66,6 +78,18 @@ impl PlayBeforeDownload {
         automation: &BrowserAutomation,
         url: &str,
     ) -> BrowserResult<PbdOutcome> {
+        let artifacts = self
+            .collect_with_options(automation, url, CollectOptions::default())
+            .await?;
+        Ok(artifacts.outcome)
+    }
+
+    pub async fn collect_with_options(
+        &self,
+        automation: &BrowserAutomation,
+        url: &str,
+        options: CollectOptions,
+    ) -> BrowserResult<PbdArtifacts> {
         let mut human = HumanMotionController::new(self.config.human_simulation.clone());
         let context = automation.new_context().await?;
         context.goto(url).await?;
@@ -93,10 +117,25 @@ impl PlayBeforeDownload {
             }
         });
         let metadata = self.metadata.extract(context.page()).await?;
-        Ok(PbdOutcome {
-            capture,
-            validation,
-            metadata,
+        let screenshot = if options.capture_screenshot {
+            let params = ScreenshotParams::builder().build();
+            match context.page().screenshot(params).await {
+                Ok(bytes) => Some(bytes),
+                Err(err) => {
+                    warn!(error = %err, "failed to capture screenshot during PBD");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        Ok(PbdArtifacts {
+            outcome: PbdOutcome {
+                capture,
+                validation,
+                metadata,
+            },
+            screenshot,
         })
     }
 

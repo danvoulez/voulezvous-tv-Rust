@@ -1,21 +1,32 @@
+#![allow(
+    clippy::result_large_err,
+    clippy::field_reassign_with_default,
+    clippy::to_string_in_format_args,
+    clippy::vec_init_then_push
+)]
+
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use thiserror::Error;
+use tokio::runtime::Builder;
 use vvtv_core::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
-    ConfigBundle, DashboardGenerator, MetricRecord, MetricsStore, MonitorError, Plan,
-    PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord, PlanMetrics, PlanStatus,
-    PlayoutQueueStore, QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics,
-    QueueStatus, SqlitePlanStore,
+    BrowserError, BrowserLauncher, BrowserQaRunner, ConfigBundle, DashboardGenerator, MetricRecord,
+    MetricsStore, MonitorError, Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry,
+    PlanImportRecord, PlanMetrics, PlanStatus, PlayoutQueueStore, ProfileManager, QaMetricsStore,
+    QaStatistics, QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics,
+    QueueStatus, SessionRecorder, SessionRecorderConfig, SmokeMode, SmokeTestOptions,
+    SmokeTestResult, SqlitePlanStore,
 };
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -36,6 +47,8 @@ pub enum AppError {
     Queue(#[from] QueueError),
     #[error("monitor error: {0}")]
     Monitor(#[from] MonitorError),
+    #[error("browser automation error: {0}")]
+    Browser(#[from] BrowserError),
     #[error("authentication failed")]
     Authentication,
     #[error("required resource missing: {0}")]
@@ -112,6 +125,9 @@ pub enum Commands {
     #[command(name = "health")]
     #[command(subcommand)]
     Health(HealthCommands),
+    /// Ferramentas de QA
+    #[command(subcommand)]
+    Qa(QaCommands),
 }
 
 #[derive(Subcommand, Debug)]
@@ -269,6 +285,74 @@ pub enum HealthCommands {
     Dashboard(HealthDashboardArgs),
 }
 
+#[derive(Subcommand, Debug)]
+pub enum QaCommands {
+    /// Executa smoke test do curator
+    SmokeTest(QaSmokeArgs),
+    /// Gera dashboard HTML de QA
+    Report(QaReportArgs),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum SmokeModeValue {
+    Headless,
+    Headed,
+}
+
+impl From<SmokeModeValue> for SmokeMode {
+    fn from(value: SmokeModeValue) -> Self {
+        match value {
+            SmokeModeValue::Headless => SmokeMode::Headless,
+            SmokeModeValue::Headed => SmokeMode::Headed,
+        }
+    }
+}
+
+#[derive(Args, Debug)]
+pub struct QaSmokeArgs {
+    /// URL alvo do smoke test
+    pub url: String,
+    /// Modo de execução (headed/headless)
+    #[arg(long, value_enum, default_value_t = SmokeModeValue::Headless)]
+    pub mode: SmokeModeValue,
+    /// Diretório para salvar screenshots
+    #[arg(long)]
+    pub screenshot_dir: Option<PathBuf>,
+    /// Não captura screenshot
+    #[arg(long, default_value_t = false)]
+    pub no_screenshot: bool,
+    /// Ativa gravação de vídeo da sessão
+    #[arg(long, default_value_t = false)]
+    pub record_video: bool,
+    /// Diretório para salvar vídeos
+    #[arg(long)]
+    pub video_dir: Option<PathBuf>,
+    /// Caminho alternativo para ffmpeg
+    #[arg(long)]
+    pub ffmpeg_path: Option<PathBuf>,
+    /// Duração máxima da captura de vídeo (segundos)
+    #[arg(long, default_value_t = 30)]
+    pub record_duration: u64,
+}
+
+#[derive(Args, Debug)]
+pub struct QaReportArgs {
+    /// Caminho do arquivo HTML de saída
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QaSmokeReport {
+    pub result: SmokeTestResult,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QaReportResult {
+    pub output: PathBuf,
+    pub stats: QaStatistics,
+}
+
 pub fn run(cli: Cli) -> Result<()> {
     enforce_token(&cli)?;
     let context = AppContext::new(&cli)?;
@@ -342,6 +426,16 @@ pub fn run(cli: Cli) -> Result<()> {
             HealthCommands::Dashboard(args) => {
                 let result = context.health_dashboard(args)?;
                 render(&result, cli.format)?;
+            }
+        },
+        Commands::Qa(command) => match command {
+            QaCommands::SmokeTest(args) => {
+                let report = context.qa_smoke_test(args)?;
+                render(&report, cli.format)?;
+            }
+            QaCommands::Report(args) => {
+                let report = context.qa_report(args)?;
+                render(&report, cli.format)?;
             }
         },
     }
@@ -869,6 +963,69 @@ impl AppContext {
         })
     }
 
+    fn qa_smoke_test(&self, args: &QaSmokeArgs) -> Result<QaSmokeReport> {
+        let mut browser_config = self.bundle.browser.clone();
+        let failure_log = self
+            .bundle
+            .vvtv
+            .resolve_path(&browser_config.observability.failure_log);
+        browser_config.observability.failure_log = failure_log.to_string_lossy().to_string();
+        let metrics_db_path = self
+            .bundle
+            .vvtv
+            .resolve_path(&browser_config.observability.metrics_db);
+        browser_config.observability.metrics_db = metrics_db_path.to_string_lossy().to_string();
+
+        let cache_dir = self
+            .bundle
+            .vvtv
+            .resolve_path(&self.bundle.vvtv.paths.cache_dir);
+        let profiles_dir = cache_dir.join("browser_profiles");
+        let profile_manager = ProfileManager::from_config(&browser_config, &profiles_dir)?;
+        let launcher = BrowserLauncher::new(browser_config, profile_manager)?;
+        let runner = BrowserQaRunner::new(launcher)?;
+
+        let mut options = SmokeTestOptions::default();
+        options.mode = args.mode.into();
+        options.capture_screenshot = !args.no_screenshot;
+        if let Some(dir) = &args.screenshot_dir {
+            options.screenshot_dir = Some(dir.clone());
+        }
+        options.record_video = args.record_video;
+        options.record_duration = std::time::Duration::from_secs(args.record_duration);
+        if args.record_video {
+            let mut recorder_config = SessionRecorderConfig::default();
+            if let Some(dir) = &args.video_dir {
+                recorder_config.output_dir = dir.clone();
+            }
+            if let Some(path) = &args.ffmpeg_path {
+                recorder_config.ffmpeg_path = path.clone();
+            }
+            options.session_recorder = Some(Arc::new(SessionRecorder::new(recorder_config)));
+        }
+
+        let runtime = Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|err| AppError::InvalidArgument(err.to_string()))?;
+        let result = runtime.block_on(runner.run_smoke(&args.url, options))?;
+        Ok(QaSmokeReport { result })
+    }
+
+    fn qa_report(&self, args: &QaReportArgs) -> Result<QaReportResult> {
+        let store = QaMetricsStore::new(&self.metrics_db);
+        let output_path = args
+            .output
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("artifacts/qa/dashboard.html"));
+        let written = store.generate_dashboard(&output_path)?;
+        let stats = store.summarize()?;
+        Ok(QaReportResult {
+            output: written,
+            stats,
+        })
+    }
+
     fn read_loadavg(&self) -> Option<f64> {
         let content = fs::read_to_string("/proc/loadavg").ok()?;
         let first = content.split_whitespace().next()?;
@@ -1352,11 +1509,55 @@ impl DisplayFallback for HealthEntry {
     }
 }
 
+impl DisplayFallback for QaSmokeReport {
+    fn display(&self) -> String {
+        let mut lines = vec![
+            format!("URL: {}", self.result.url),
+            format!("Sucesso: {}", self.result.success),
+            format!("Duração (ms): {}", self.result.duration_ms),
+            format!("Tentativas: {}", self.result.attempts),
+            format!(
+                "HD success {}/{}",
+                self.result.metrics.hd_success, self.result.metrics.hd_attempts
+            ),
+            format!(
+                "PBD success rate: {:.1}%",
+                self.result.metrics.pbd_success_rate()
+            ),
+        ];
+        if let Some(path) = &self.result.screenshot_path {
+            lines.push(format!("Screenshot: {}", path.display()));
+        }
+        if let Some(path) = &self.result.video_path {
+            lines.push(format!("Vídeo: {}", path.display()));
+        }
+        if !self.result.warnings.is_empty() {
+            lines.push(format!("Avisos: {}", self.result.warnings.join("; ")));
+        }
+        lines.join("\n")
+    }
+}
+
+impl DisplayFallback for QaReportResult {
+    fn display(&self) -> String {
+        format!(
+            "Dashboard: {}\nTotal runs: {}\nSuccess rate: {:.1}%\nProxy rotations: {}\nBot detections: {}",
+            self.output.display(),
+            self.stats.total_runs,
+            self.stats.pbd_success_rate,
+            self.stats.proxy_rotations,
+            self.stats.bot_detections
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusqlite::params;
+    use std::path::PathBuf;
     use tempfile::TempDir;
+    use vvtv_core::BrowserMetrics;
 
     fn prepare_test_context() -> Result<(TempDir, AppContext)> {
         let temp = TempDir::new().unwrap();
@@ -1460,5 +1661,54 @@ mod tests {
             .unwrap();
         assert_eq!(list.rows.len(), 1);
         assert_eq!(list.rows[0].plan_id, "plan-1");
+    }
+
+    #[test]
+    fn qa_smoke_report_display_renders_paths_and_metrics() {
+        let mut metrics = BrowserMetrics::default();
+        metrics.hd_attempts = 1;
+        metrics.hd_success = 1;
+        metrics.proxy_rotations = 2;
+        let report = QaSmokeReport {
+            result: SmokeTestResult {
+                url: "https://example.com".into(),
+                success: true,
+                capture: None,
+                duration_ms: 900,
+                warnings: vec!["placeholder video".into()],
+                metrics,
+                screenshot_path: Some(PathBuf::from("/tmp/screenshot.png")),
+                video_path: Some(PathBuf::from("/tmp/video.mp4")),
+                attempts: 1,
+            },
+        };
+        let display = report.display();
+        assert!(display.contains("URL: https://example.com"));
+        assert!(display.contains("Screenshot: /tmp/screenshot.png"));
+        assert!(display.contains("Avisos"));
+        assert!(display.contains("PBD success rate: 100.0%"));
+    }
+
+    #[test]
+    fn qa_report_result_display_includes_summary() {
+        let stats = QaStatistics {
+            total_runs: 4,
+            success_count: 3,
+            failure_count: 1,
+            pbd_success_rate: 75.0,
+            avg_duration_ms: 1200.0,
+            proxy_rotations: 5,
+            bot_detections: 2,
+            last_run: None,
+        };
+        let report = QaReportResult {
+            output: PathBuf::from("/tmp/dashboard.html"),
+            stats,
+        };
+        let display = report.display();
+        assert!(display.contains("Dashboard: /tmp/dashboard.html"));
+        assert!(display.contains("Total runs: 4"));
+        assert!(display.contains("Proxy rotations: 5"));
+        assert!(display.contains("Bot detections: 2"));
     }
 }

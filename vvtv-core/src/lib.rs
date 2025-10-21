@@ -1,3 +1,14 @@
+#![allow(
+    clippy::default_constructed_unit_structs,
+    clippy::redundant_closure,
+    clippy::let_and_return,
+    clippy::needless_question_mark,
+    clippy::manual_strip,
+    clippy::field_reassign_with_default,
+    clippy::unnecessary_cast,
+    clippy::result_large_err
+)]
+
 pub mod broadcaster;
 pub mod browser;
 pub mod config;
@@ -16,7 +27,9 @@ pub use broadcaster::{
 pub use browser::{
     BrowserAutomation, BrowserCapture, BrowserCaptureKind, BrowserError, BrowserEvent,
     BrowserLauncher, BrowserMetrics, BrowserProfile, BrowserQaRunner, BrowserResult,
-    HumanMotionController, MetadataExtractor, PbdOutcome, PlaybackValidation,
+    HumanMotionController, MetadataExtractor, PbdOutcome, PlaybackValidation, ProfileManager,
+    QaDashboard, QaMetricsStore, QaStatistics, SessionRecorder, SessionRecorderConfig, SmokeMode,
+    SmokeTestOptions, SmokeTestResult,
 };
 pub use config::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,

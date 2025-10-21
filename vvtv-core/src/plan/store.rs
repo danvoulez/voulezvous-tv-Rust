@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
+use uuid::Uuid;
+
+use crate::browser::{Candidate, PbdOutcome};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use super::models::{
@@ -93,6 +96,54 @@ impl SqlitePlanStore {
         let conn = self.open()?;
         conn.execute_batch(PLAN_SCHEMA)?;
         Ok(())
+    }
+
+    pub fn create_plan_from_discovery(
+        &self,
+        candidate: &Candidate,
+        outcome: &PbdOutcome,
+    ) -> PlanResult<Plan> {
+        let now = Utc::now();
+        let mut plan = Plan::new(format!("dl-{}", Uuid::new_v4().simple()), "video");
+        plan.title = outcome
+            .metadata
+            .title
+            .clone()
+            .or_else(|| candidate.title.clone());
+        plan.source_url = Some(candidate.url.clone());
+        plan.duration_est_s = outcome
+            .metadata
+            .duration_seconds
+            .map(|value| value as i64)
+            .or_else(|| {
+                outcome
+                    .validation
+                    .duration_seconds
+                    .map(|value| value.round() as i64)
+            });
+        plan.resolution_observed = outcome
+            .metadata
+            .resolution_label
+            .clone()
+            .or_else(|| Some(format!("{}p", outcome.validation.video_height)));
+        plan.hd_missing = outcome.validation.video_height < 720;
+        plan.curation_score =
+            estimate_curation_score(candidate.rank, plan.duration_est_s, plan.hd_missing);
+        plan.license_proof = outcome.metadata.license_hint.clone();
+        plan.node_origin = Some("discovery-loop".to_string());
+        plan.updated_at = Some(now);
+        plan.created_at = Some(now);
+        plan.tags = outcome
+            .metadata
+            .tags
+            .iter()
+            .map(|tag| tag.normalized.clone())
+            .collect();
+        plan.trending_score = 0.0;
+        plan.failure_count = 0;
+
+        self.upsert_plan(&plan)?;
+        Ok(plan)
     }
 
     pub fn upsert_plan(&self, plan: &Plan) -> PlanResult<()> {
@@ -592,4 +643,24 @@ impl SqlitePlanStore {
         )?;
         Ok(())
     }
+}
+
+fn estimate_curation_score(rank: usize, duration: Option<i64>, hd_missing: bool) -> f64 {
+    let rank_component = (1.0 / (rank as f64 + 0.5)).min(1.0);
+    let duration_bonus = duration
+        .map(|seconds| {
+            if seconds >= 900 {
+                0.18
+            } else if seconds >= 420 {
+                0.12
+            } else if seconds >= 180 {
+                0.06
+            } else {
+                0.02
+            }
+        })
+        .unwrap_or(0.05);
+    let hd_adjustment = if hd_missing { -0.18 } else { 0.12 };
+    let base = 0.45;
+    (base + 0.35 * rank_component + duration_bonus + hd_adjustment).clamp(0.2, 0.98)
 }

@@ -908,6 +908,12 @@ impl RateLimiter {
 3. **Network errors:** Implementar retries com backoff
 4. **Rate limits:** Delays generosos entre requests
 
+### Notas da Implementação Atual (2025-10-21)
+
+- O `ContentSearcher` abre as páginas de resultado usando os endpoints de vídeo (Google `tbm=vid`, Bing vídeos, DuckDuckGo `ia=video`) e aplica heurísticas de domínio + palavras-chave para filtrar candidatos.
+- O `DiscoveryLoop` calcula `curation_score` inicial com base no ranking e resolução detectada, registra estatísticas (`DiscoveryStats`) e respeita `dry_run` sem persistir PLANs.
+- O comando `vvtvctl discover` expõe `--query`, `--max-plans`, `--search-engine`, `--dry-run` e `--debug`, reaproveitando o mesmo Chrome profile manager.
+
 ### Dependências Rust
 
 ```toml

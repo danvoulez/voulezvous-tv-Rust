@@ -26,10 +26,13 @@ pub use broadcaster::{
 };
 pub use browser::{
     BrowserAutomation, BrowserCapture, BrowserCaptureKind, BrowserError, BrowserEvent,
-    BrowserLauncher, BrowserMetrics, BrowserProfile, BrowserQaRunner, BrowserResult,
-    HumanMotionController, MetadataExtractor, PbdOutcome, PlaybackValidation, ProfileManager,
-    QaDashboard, QaMetricsStore, QaStatistics, SessionRecorder, SessionRecorderConfig, SmokeMode,
-    SmokeTestOptions, SmokeTestResult,
+    BrowserLauncher, BrowserMetrics, BrowserPbdRunner, BrowserProfile, BrowserQaRunner,
+    BrowserResult, BrowserSearchSessionFactory, ContentSearcher, DiscoveryConfig, DiscoveryLoop,
+    DiscoveryPbd, DiscoveryPlanStore, DiscoveryStats, HumanMotionController, MetadataExtractor,
+    PbdOutcome, PlayBeforeDownload, PlaybackValidation, ProfileManager, QaDashboard,
+    QaMetricsStore, QaStatistics, SearchConfig, SearchEngine, SearchResultRaw, SearchSession,
+    SearchSessionFactory, SessionRecorder, SessionRecorderConfig, SmokeMode, SmokeTestOptions,
+    SmokeTestResult,
 };
 pub use config::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,

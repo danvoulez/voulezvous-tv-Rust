@@ -134,6 +134,7 @@ pub struct BrowserConfig {
     pub retry: RetrySection,
     pub ip_rotation: IpRotationSection,
     pub observability: ObservabilitySection,
+    pub discovery: DiscoverySection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -195,6 +196,16 @@ pub struct PbdSection {
     pub hd_priority: Vec<String>,
     pub playback_wait_seconds: [u32; 2],
     pub validation_buffer_seconds: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DiscoverySection {
+    pub search_engine: String,
+    pub search_delay_ms: [u64; 2],
+    pub scroll_iterations: usize,
+    pub max_results_per_search: usize,
+    pub candidate_delay_ms: [u64; 2],
+    pub filter_domains: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

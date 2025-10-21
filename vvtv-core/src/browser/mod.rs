@@ -1,4 +1,5 @@
 mod automation;
+mod discovery_loop;
 mod error;
 mod error_handler;
 mod fingerprint;
@@ -10,8 +11,13 @@ mod pbd;
 mod profile;
 mod qa;
 mod retry;
+mod searcher;
 
 pub use automation::{BrowserAutomation, BrowserEvent, BrowserLauncher, LaunchOverrides};
+pub use discovery_loop::{
+    BrowserPbdRunner, DiscoveryConfig, DiscoveryLoop, DiscoveryPbd, DiscoveryPlanStore,
+    DiscoveryStats,
+};
 pub use error::{BrowserError, BrowserResult};
 pub use error_handler::{
     map_category, telemetry_failure, telemetry_run, AutomationTelemetry, BrowserErrorCategory,
@@ -33,3 +39,7 @@ pub use qa::{
     SmokeTestResult,
 };
 pub use retry::{RetryOutcome, RetryPolicy};
+pub use searcher::{
+    BrowserSearchSessionFactory, Candidate, ContentSearcher, SearchConfig, SearchEngine,
+    SearchResultRaw, SearchSession, SearchSessionFactory,
+};

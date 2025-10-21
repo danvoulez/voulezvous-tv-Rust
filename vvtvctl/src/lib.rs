@@ -5,6 +5,8 @@
     clippy::vec_init_then_push
 )]
 
+mod commands;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -15,18 +17,22 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use commands::discover::DiscoverArgs;
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use thiserror::Error;
 use tokio::runtime::Builder;
+use tracing_subscriber::{fmt as tracing_fmt, EnvFilter};
 use vvtv_core::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
-    BrowserError, BrowserLauncher, BrowserQaRunner, ConfigBundle, DashboardGenerator, MetricRecord,
-    MetricsStore, MonitorError, Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry,
-    PlanImportRecord, PlanMetrics, PlanStatus, PlayoutQueueStore, ProfileManager, QaMetricsStore,
+    BrowserError, BrowserLauncher, BrowserPbdRunner, BrowserQaRunner, BrowserSearchSessionFactory,
+    ConfigBundle, ContentSearcher, DashboardGenerator, DiscoveryConfig, DiscoveryLoop,
+    DiscoveryPbd, DiscoveryPlanStore, DiscoveryStats, MetricRecord, MetricsStore, MonitorError,
+    Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord, PlanMetrics,
+    PlanStatus, PlayBeforeDownload, PlayoutQueueStore, ProfileManager, QaMetricsStore,
     QaStatistics, QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics,
-    QueueStatus, SessionRecorder, SessionRecorderConfig, SmokeMode, SmokeTestOptions,
-    SmokeTestResult, SqlitePlanStore,
+    QueueStatus, SearchConfig, SearchEngine, SearchSessionFactory, SessionRecorder,
+    SessionRecorderConfig, SmokeMode, SmokeTestOptions, SmokeTestResult, SqlitePlanStore,
 };
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -112,6 +118,8 @@ pub enum OutputFormat {
 pub enum Commands {
     /// Exibe status operacional resumido
     Status,
+    /// Executa descoberta autônoma de conteúdo
+    Discover(DiscoverArgs),
     /// Operações relacionadas a PLANs
     #[command(subcommand)]
     Plan(PlanCommands),
@@ -362,6 +370,10 @@ pub fn run(cli: Cli) -> Result<()> {
             let status = context.gather_status()?;
             render(&status, cli.format)?;
         }
+        Commands::Discover(args) => {
+            let report = context.discovery_run(args)?;
+            render(&report, cli.format)?;
+        }
         Commands::Plan(command) => match command {
             PlanCommands::List(args) => {
                 let plans = context.plan_list(args)?;
@@ -469,6 +481,18 @@ where
             Ok(())
         }
     }
+}
+
+fn init_discovery_tracing(enable: bool) {
+    if !enable {
+        return;
+    }
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(
+            "info,vvtv_core::browser::discovery_loop=debug,vvtv_core::browser::searcher=debug",
+        )
+    });
+    let _ = tracing_fmt().with_env_filter(filter).try_init();
 }
 
 trait DisplayFallback {
@@ -916,6 +940,19 @@ impl AppContext {
         Ok(builder.build()?)
     }
 
+    fn plan_store_or_create(&self) -> Result<SqlitePlanStore> {
+        if let Some(parent) = self.plans_db.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let builder = SqlitePlanStore::builder()
+            .path(&self.plans_db)
+            .create_if_missing(true)
+            .read_only(false);
+        let store = builder.build()?;
+        store.initialize()?;
+        Ok(store)
+    }
+
     fn metrics_snapshot(&self) -> Result<Option<MetricsSnapshot>> {
         let store = self.metrics_store()?;
         let snapshot = store.latest()?;
@@ -1004,7 +1041,7 @@ impl AppContext {
             options.session_recorder = Some(Arc::new(SessionRecorder::new(recorder_config)));
         }
 
-        let runtime = Builder::new_multi_thread()
+        let runtime = Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|err| AppError::InvalidArgument(err.to_string()))?;
@@ -1026,6 +1063,101 @@ impl AppContext {
         })
     }
 
+    fn discovery_run(&self, args: &DiscoverArgs) -> Result<DiscoverReport> {
+        init_discovery_tracing(args.debug);
+
+        let mut browser_config = self.bundle.browser.clone();
+        let failure_log = self
+            .bundle
+            .vvtv
+            .resolve_path(&browser_config.observability.failure_log);
+        browser_config.observability.failure_log = failure_log.to_string_lossy().to_string();
+        let metrics_db_path = self
+            .bundle
+            .vvtv
+            .resolve_path(&browser_config.observability.metrics_db);
+        browser_config.observability.metrics_db = metrics_db_path.to_string_lossy().to_string();
+
+        let cache_dir = self
+            .bundle
+            .vvtv
+            .resolve_path(&self.bundle.vvtv.paths.cache_dir);
+        let profiles_dir = cache_dir.join("browser_profiles");
+        let profile_manager = ProfileManager::from_config(&browser_config, &profiles_dir)?;
+        let launcher = BrowserLauncher::new(browser_config.clone(), profile_manager)?;
+
+        let plan_store = Arc::new(self.plan_store_or_create()?);
+
+        let engine = match &args.search_engine {
+            Some(value) => SearchEngine::from_str(value).map_err(AppError::Browser)?,
+            None => SearchEngine::from_str(&browser_config.discovery.search_engine)
+                .map_err(AppError::Browser)?,
+        };
+
+        let search_config = Arc::new(SearchConfig {
+            search_engine: engine,
+            scroll_iterations: browser_config.discovery.scroll_iterations,
+            max_results: browser_config.discovery.max_results_per_search,
+            filter_domains: browser_config.discovery.filter_domains.clone(),
+            delay_range_ms: (
+                browser_config.discovery.search_delay_ms[0],
+                browser_config.discovery.search_delay_ms[1],
+            ),
+        });
+
+        let discovery_config = DiscoveryConfig {
+            max_plans_per_run: args.max_plans,
+            candidate_delay_range_ms: (
+                browser_config.discovery.candidate_delay_ms[0],
+                browser_config.discovery.candidate_delay_ms[1],
+            ),
+            stop_on_first_error: false,
+            dry_run: args.dry_run,
+            debug: args.debug,
+        };
+
+        let browser_config_arc = Arc::new(browser_config.clone());
+        let pbd = Arc::new(PlayBeforeDownload::new(browser_config_arc));
+
+        let runtime = Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|err| AppError::InvalidArgument(err.to_string()))?;
+
+        let query = args.query.clone();
+        let stats = runtime.block_on({
+            let search_config = Arc::clone(&search_config);
+            let discovery_config = discovery_config.clone();
+            let plan_store = Arc::clone(&plan_store);
+            let pbd = Arc::clone(&pbd);
+            async move {
+                let automation = Arc::new(launcher.launch().await?);
+                let session_factory: Arc<dyn SearchSessionFactory> =
+                    Arc::new(BrowserSearchSessionFactory::new(Arc::clone(&automation)));
+                let searcher = ContentSearcher::new(search_config, session_factory);
+                let pbd_runner: Arc<dyn DiscoveryPbd> =
+                    Arc::new(BrowserPbdRunner::new(Arc::clone(&automation), pbd));
+                let plan_store_trait: Arc<dyn DiscoveryPlanStore> = plan_store;
+                let stats = {
+                    let mut discovery = DiscoveryLoop::new(
+                        searcher,
+                        pbd_runner,
+                        plan_store_trait,
+                        discovery_config,
+                    );
+                    discovery.run(&query).await?
+                };
+                let automation = Arc::try_unwrap(automation).map_err(|_| {
+                    BrowserError::Unexpected("browser automation still in use".into())
+                })?;
+                automation.shutdown().await?;
+                Ok::<DiscoveryStats, BrowserError>(stats)
+            }
+        })?;
+
+        Ok(DiscoverReport::from_stats(stats))
+    }
+
     fn read_loadavg(&self) -> Option<f64> {
         let content = fs::read_to_string("/proc/loadavg").ok()?;
         let first = content.split_whitespace().next()?;
@@ -1037,6 +1169,65 @@ impl AppContext {
         let content = fs::read_to_string(path).ok()?;
         let raw = content.trim().parse::<f64>().ok()?;
         Some(raw / 1000.0)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiscoverReport {
+    pub query: String,
+    pub search_engine: String,
+    pub dry_run: bool,
+    pub candidates_found: usize,
+    pub candidates_processed: usize,
+    pub plans_created: usize,
+    pub total_wait_ms: u64,
+    pub duration_secs: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
+impl DiscoverReport {
+    fn from_stats(stats: DiscoveryStats) -> Self {
+        Self {
+            query: stats.query,
+            search_engine: stats.search_engine,
+            dry_run: stats.dry_run,
+            candidates_found: stats.candidates_found,
+            candidates_processed: stats.candidates_processed,
+            plans_created: stats.plans_created,
+            total_wait_ms: stats.total_wait_ms,
+            duration_secs: stats.duration_secs,
+            errors: stats.errors,
+        }
+    }
+}
+
+impl DisplayFallback for DiscoverReport {
+    fn display(&self) -> String {
+        let mut lines = vec![format!(
+            "Descoberta \"{}\" via {}",
+            self.query, self.search_engine
+        )];
+        lines.push(format!(
+            "Candidatos: {} encontrados / {} processados",
+            self.candidates_found, self.candidates_processed
+        ));
+        if self.dry_run {
+            lines.push(format!("PLANs simulados: {}", self.plans_created));
+        } else {
+            lines.push(format!("PLANs criados: {}", self.plans_created));
+        }
+        lines.push(format!(
+            "Atraso acumulado: {} ms | duração total: {} s",
+            self.total_wait_ms, self.duration_secs
+        ));
+        if !self.errors.is_empty() {
+            lines.push(format!("Falhas ({}):", self.errors.len()));
+            for err in &self.errors {
+                lines.push(format!("  - {err}"));
+            }
+        }
+        lines.join("\n")
     }
 }
 

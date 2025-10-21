@@ -5,6 +5,8 @@
 > Data: 2025-10-21  
 > Status: Ready for Implementation
 
+> **Atualização 2025-10-XX:** P1–P3 entregues neste repositório. Card `business_logic.yaml`, seleção Gumbel-Top-k com seeds por slot, hooks LLM (com circuit breaker) e Curator Vigilante com token bucket já estão disponíveis em `vvtv-core`/`vvtvctl`.
+
 ---
 
 ## 📋 ÍNDICE
@@ -72,6 +74,8 @@ P4 depende de P1+P2 (hooks) + P6 (métricas) + P7 (tests)
 - Bench micro (`criterion`) para seleção
 - Doc `BUSINESS_LOGIC_README.md` (schema + exemplos)
 
+**Status:** ✅ Implementado (`vvtv-core/src/business_logic/mod.rs`, `vvtv-core/src/plan/selection/mod.rs`, `vvtvctl business-logic`).
+
 **Estimativa:** 3–4 dias
 
 ---
@@ -100,6 +104,8 @@ P4 depende de P1+P2 (hooks) + P6 (métricas) + P7 (tests)
 - Fixture de mock LLM (latência configurável)
 - Doc `LLM_HOOKS.md` com prompts e SLA
 
+**Status:** ✅ Implementado (`vvtv-core/src/llm/mod.rs`, registro em `Planner`, testes com handler estático).
+
 **Estimativa:** 4 dias
 
 ---
@@ -126,6 +132,8 @@ P4 depende de P1+P2 (hooks) + P6 (métricas) + P7 (tests)
 
 - Tests: cada detector, threshold, token bucket, janela de prime-only
 - Doc `CURATOR_VIGILANTE.md` (sinais, thresholds, exemplos)
+
+**Status:** ✅ Implementado (`vvtv-core/src/curation/mod.rs`, logging em `logs/curator_vigilante/*.jsonl`).
 
 **Estimativa:** 4 dias
 

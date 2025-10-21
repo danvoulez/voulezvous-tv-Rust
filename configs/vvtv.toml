@@ -16,6 +16,7 @@ storage_dir = "/vvtv/storage"
 broadcast_dir = "/vvtv/broadcast"
 logs_dir = "/vvtv/system/logs"
 vault_dir = "/vvtv/vault"
+business_logic = "/vvtv/business_logic/business_logic.yaml"
 
 [limits]
 # Buffer management

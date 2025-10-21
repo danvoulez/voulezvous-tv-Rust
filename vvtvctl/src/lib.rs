@@ -28,18 +28,18 @@ use vvtv_core::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
     AdaptiveProgrammer, AdaptiveReport, AudienceReport, AudienceStore, AudienceStoreBuilder,
     BrowserError, BrowserLauncher, BrowserPbdRunner, BrowserQaRunner, BrowserSearchSessionFactory,
-    ConfigBundle, ContentSearcher, DashboardArtifacts, DashboardError, DashboardGenerator,
-    DiscoveryConfig, DiscoveryLoop, DiscoveryPbd, DiscoveryPlanStore, DiscoveryStats,
-    DispatchAction, DispatchStatus, EconomyError, EconomyEvent, EconomyEventType, EconomyStore,
-    EconomyStoreBuilder, EconomySummary, IncidentDispatch, IncidentError, IncidentHistoryWriter,
-    IncidentNotifier, IncidentReport, IncidentSeverity, LedgerExport, MetricRecord, MetricsStore,
-    MicroSpotContract, MicroSpotInjection, MicroSpotManager, MonetizationDashboard, MonitorError,
-    NewEconomyEvent, NewViewerSession, Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry,
-    PlanImportRecord, PlanMetrics, PlanStatus, PlayBeforeDownload, PlayoutQueueStore,
-    ProfileManager, QaMetricsStore, QaStatistics, QueueEntry as QueueStoreEntry, QueueError,
-    QueueFilter, QueueMetrics, QueueStatus, SearchConfig, SearchEngine, SearchSessionFactory,
-    SessionRecorder, SessionRecorderConfig, SmokeMode, SmokeTestOptions, SmokeTestResult,
-    SqlitePlanStore, ViewerSession,
+    BusinessLogic, BusinessLogicError, ConfigBundle, ContentSearcher, DashboardArtifacts,
+    DashboardError, DashboardGenerator, DiscoveryConfig, DiscoveryLoop, DiscoveryPbd,
+    DiscoveryPlanStore, DiscoveryStats, DispatchAction, DispatchStatus, EconomyError, EconomyEvent,
+    EconomyEventType, EconomyStore, EconomyStoreBuilder, EconomySummary, IncidentDispatch,
+    IncidentError, IncidentHistoryWriter, IncidentNotifier, IncidentReport, IncidentSeverity,
+    LedgerExport, MetricRecord, MetricsStore, MicroSpotContract, MicroSpotInjection,
+    MicroSpotManager, MonetizationDashboard, MonitorError, NewEconomyEvent, NewViewerSession, Plan,
+    PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord, PlanMetrics, PlanStatus,
+    PlayBeforeDownload, PlayoutQueueStore, ProfileManager, QaMetricsStore, QaStatistics,
+    QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics, QueueStatus,
+    SearchConfig, SearchEngine, SearchSessionFactory, SessionRecorder, SessionRecorderConfig,
+    SmokeMode, SmokeTestOptions, SmokeTestResult, SqlitePlanStore, ViewerSession,
 };
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -99,6 +99,9 @@ pub struct Cli {
     /// Caminho alternativo para broadcaster.toml
     #[arg(long)]
     pub broadcaster_config: Option<PathBuf>,
+    /// Caminho alternativo para business_logic.yaml
+    #[arg(long)]
+    pub business_logic: Option<PathBuf>,
     /// Diretório override para dados (substitui paths.data_dir)
     #[arg(long)]
     pub data_dir: Option<PathBuf>,
@@ -169,12 +172,33 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+    /// Operações relacionadas ao cartão de negócios
+    #[command(name = "business-logic")]
+    #[command(subcommand)]
+    BusinessLogic(BusinessLogicCommands),
     /// Operações de monetização e analytics
     #[command(subcommand)]
     Monetization(MonetizationCommands),
     /// Comunicação e registro de incidentes
     #[command(subcommand)]
     Incident(IncidentCommands),
+}
+
+#[derive(Args, Debug)]
+pub struct BusinessLogicArgs {
+    /// Caminho alternativo para business_logic.yaml
+    #[arg(long)]
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BusinessLogicCommands {
+    /// Exibe o cartão de negócios carregado
+    Show(BusinessLogicArgs),
+    /// Valida o cartão de negócios
+    Validate(BusinessLogicArgs),
+    /// Recarrega o cartão de negócios a partir do disco
+    Reload(BusinessLogicArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -779,6 +803,20 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Completions { shell } => {
             output_completions(*shell)?;
         }
+        Commands::BusinessLogic(command) => match command {
+            BusinessLogicCommands::Show(args) => {
+                let view = context.business_logic_show(&args.path)?;
+                render(&view, cli.format)?;
+            }
+            BusinessLogicCommands::Validate(args) => {
+                let status = context.business_logic_validate(&args.path)?;
+                render(&status, cli.format)?;
+            }
+            BusinessLogicCommands::Reload(args) => {
+                let status = context.business_logic_reload(&args.path)?;
+                render(&status, cli.format)?;
+            }
+        },
         Commands::Monetization(command) => match command {
             MonetizationCommands::Ledger(sub) => match sub {
                 LedgerCommands::Record(args) => {
@@ -900,6 +938,30 @@ fn init_discovery_tracing(enable: bool) {
     let _ = tracing_fmt().with_env_filter(filter).try_init();
 }
 
+#[derive(Debug, Serialize)]
+pub struct BusinessLogicView {
+    pub path: String,
+    pub policy_version: String,
+    pub environment: String,
+    pub selection_method: String,
+    pub temperature: f64,
+    pub top_k: usize,
+    pub bias: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BusinessLogicValidation {
+    pub path: String,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BusinessLogicReloadResult {
+    pub path: String,
+    pub policy_version: String,
+    pub reloaded: bool,
+}
+
 fn parse_event_type(value: &str) -> Result<EconomyEventType> {
     EconomyEventType::from_str(value).map_err(|err| match err {
         EconomyError::InvalidEventType(_) => {
@@ -919,6 +981,37 @@ trait DisplayFallback {
     fn display(&self) -> String;
 }
 
+impl DisplayFallback for BusinessLogicView {
+    fn display(&self) -> String {
+        format!(
+            "business_logic: {path}\n policy_version: {version}\n env: {env}\n method: {method}\n temperature: {temp:.2}\n top_k: {top}\n bias: {bias:.3}",
+            path = self.path,
+            version = self.policy_version,
+            env = self.environment,
+            method = self.selection_method,
+            temp = self.temperature,
+            top = self.top_k,
+            bias = self.bias
+        )
+    }
+}
+
+impl DisplayFallback for BusinessLogicValidation {
+    fn display(&self) -> String {
+        format!("{}: {}", self.path, self.status)
+    }
+}
+
+impl DisplayFallback for BusinessLogicReloadResult {
+    fn display(&self) -> String {
+        format!(
+            "reloaded {path} (policy_version={version})",
+            path = self.path,
+            version = self.policy_version
+        )
+    }
+}
+
 #[derive(Debug)]
 struct AppContext {
     bundle: ConfigBundle,
@@ -926,6 +1019,7 @@ struct AppContext {
     browser_path: PathBuf,
     processor_path: PathBuf,
     broadcaster_path: PathBuf,
+    business_logic_path: PathBuf,
     data_dir: PathBuf,
     plans_db: PathBuf,
     queue_db: PathBuf,
@@ -959,7 +1053,6 @@ impl AppContext {
             .broadcaster_config
             .clone()
             .unwrap_or_else(|| config_dir.join("broadcaster.toml"));
-
         let browser = load_browser_config(&browser_path)?;
         let processor = load_processor_config(&processor_path)?;
         let broadcaster = load_broadcaster_config(&broadcaster_path)?;
@@ -969,6 +1062,29 @@ impl AppContext {
             processor,
             broadcaster,
         };
+
+        let business_logic_path = cli
+            .business_logic
+            .clone()
+            .or_else(|| {
+                bundle
+                    .vvtv
+                    .paths
+                    .business_logic
+                    .as_ref()
+                    .map(|value| PathBuf::from(value))
+            })
+            .map(|candidate| {
+                if candidate.is_absolute() {
+                    candidate
+                } else {
+                    PathBuf::from(&bundle.vvtv.paths.base_dir).join(candidate)
+                }
+            })
+            .unwrap_or_else(|| {
+                PathBuf::from(&bundle.vvtv.paths.base_dir)
+                    .join("business_logic/business_logic.yaml")
+            });
 
         let default_data = PathBuf::from(&bundle.vvtv.paths.data_dir);
         let data_dir = cli.data_dir.clone().unwrap_or_else(|| default_data.clone());
@@ -1017,6 +1133,7 @@ impl AppContext {
             browser_path,
             processor_path,
             broadcaster_path,
+            business_logic_path,
             data_dir,
             plans_db,
             queue_db,
@@ -1026,6 +1143,61 @@ impl AppContext {
             reports_dir,
             scripts_dir,
             fill_script,
+        })
+    }
+
+    fn resolve_business_logic_path(&self, override_path: &Option<PathBuf>) -> PathBuf {
+        match override_path {
+            Some(candidate) if candidate.is_absolute() => candidate.clone(),
+            Some(candidate) => PathBuf::from(&self.bundle.vvtv.paths.base_dir).join(candidate),
+            None => self.business_logic_path.clone(),
+        }
+    }
+
+    fn load_business_logic(&self, path: &Path) -> Result<BusinessLogic> {
+        BusinessLogic::load_from_file(path).map_err(|err| match err {
+            BusinessLogicError::Io(inner) => AppError::Io(inner),
+            BusinessLogicError::Yaml(inner) => AppError::InvalidArgument(inner.to_string()),
+            BusinessLogicError::Invalid(message) => AppError::InvalidArgument(message),
+        })
+    }
+
+    fn business_logic_show(&self, override_path: &Option<PathBuf>) -> Result<BusinessLogicView> {
+        let path = self.resolve_business_logic_path(override_path);
+        let logic = self.load_business_logic(&path)?;
+        Ok(BusinessLogicView {
+            path: path.display().to_string(),
+            policy_version: logic.policy_version.clone(),
+            environment: logic.env.clone(),
+            selection_method: format!("{:?}", logic.selection_method()),
+            temperature: logic.selection_temperature(),
+            top_k: logic.selection_top_k(12),
+            bias: logic.plan_selection_bias(),
+        })
+    }
+
+    fn business_logic_validate(
+        &self,
+        override_path: &Option<PathBuf>,
+    ) -> Result<BusinessLogicValidation> {
+        let path = self.resolve_business_logic_path(override_path);
+        self.load_business_logic(&path)?;
+        Ok(BusinessLogicValidation {
+            path: path.display().to_string(),
+            status: "valid".to_string(),
+        })
+    }
+
+    fn business_logic_reload(
+        &self,
+        override_path: &Option<PathBuf>,
+    ) -> Result<BusinessLogicReloadResult> {
+        let path = self.resolve_business_logic_path(override_path);
+        let logic = self.load_business_logic(&path)?;
+        Ok(BusinessLogicReloadResult {
+            path: path.display().to_string(),
+            policy_version: logic.policy_version.clone(),
+            reloaded: true,
         })
     }
 
@@ -2838,6 +3010,7 @@ mod tests {
             browser_config: None,
             processor_config: None,
             broadcaster_config: None,
+            business_logic: None,
             data_dir: Some(data_dir.clone()),
             scripts_dir: Some(scripts_dir.clone()),
             plans_db: Some(plans_db.clone()),

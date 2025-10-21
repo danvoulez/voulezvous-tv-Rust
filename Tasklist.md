@@ -138,6 +138,22 @@
 
 ---
 
+## Epic P — Business Logic & Intelligent Curation
+- ✅ **PR P1 — Core Business Logic Engine**
+  - ✅ Loader `BusinessLogic::load_from_file` + validação no CLI (`vvtvctl business-logic show|validate|reload`).
+  - ✅ Seleção Gumbel-Top-k com seed robusto (`plan/selection/mod.rs`) e logging estruturado.
+  - ✅ YAML de exemplo (`configs/business_logic.yaml`) e path configurável em `vvtv.toml`.
+- ✅ **PR P2 — LLM Integration & Circuit Breakers**
+  - ✅ Módulo `llm::LlmOrchestrator` com circuit breaker e timeout (`vvtv-core/src/llm/mod.rs`).
+  - ✅ Rerank `Planner` integra hooks e anotações de ação LLM nos rationales.
+  - ✅ Tests de curto-circuito e documentação em `docs/LLM_HOOKS.md`.
+- ✅ **PR P3 — Curator Vigilante & Token Bucket**
+  - ✅ Detectores (paleta/tags/duração/imbalance/KLD/cadência) e token bucket configurável (`vvtv-core/src/curation/mod.rs`).
+  - ✅ Logs JSONL por dia em `logs/curator_vigilante/` com decisões Advice/Apply.
+  - ✅ Doc `docs/CURATOR_VIGILANTE.md` com thresholds e exemplos.
+
+---
+
 ## Epic E — Processor & Media Engineering (T-4h)
 - ✅ **PR E1 — Reabrir página e confirmar rendition no T-4h**
   - ✅ Reutilizar automação PBD para revalidação (planos `selected`).

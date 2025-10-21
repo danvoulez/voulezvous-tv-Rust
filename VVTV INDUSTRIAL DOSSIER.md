@@ -697,6 +697,36 @@ window.navigator.permissions.query = (p)=>p.name==='notifications'
 *   `videoWidth/Height` bate com a rendition escolhida.
 *   Buffer ahead ≥ 3 s.
 
+### Discovery Loop (Implementado)
+
+**Objetivo:** manter descoberta contínua sem supervisão humana, convertendo resultados em PLANs auditáveis.
+
+**Componentes principais:**
+
+1.  **ContentSearcher** — motores Google/Bing/DuckDuckGo com scraping JS e heurísticas (schema.org `VideoObject`, duração mínima, indicadores “creative commons”).
+2.  **DiscoveryLoop** — automatiza `search → rate limit → abrir candidato → Play-Before-Download → registrar plan`, monitora `plans_per_run`, `hd_hit_rate`, `failures_by_category` e respeita janelas configuráveis.
+3.  **SqlitePlanStore** — operando com PRAGMAs (WAL, cache, mmap) e origin tag `discovery-loop`, garantindo concorrência segura.
+4.  **CLI operacional** — `vvtvctl discover --query "creative commons documentary" --max-plans 10 --dry-run` (saída texto/JSON) com autenticação opcional (`VVTVCTL_TOKEN`).
+
+**Configuração (`browser.toml`):**
+
+```toml
+[discovery]
+search_engine = "google"
+search_delay_ms = [2000, 5000]
+scroll_iterations = 3
+max_results_per_search = 20
+candidate_delay_ms = [8000, 15000]
+filter_domains = ["youtube.com", "vimeo.com", "dailymotion.com"]
+```
+
+**Métricas & QA:**
+
+- Persistir execuções em `metrics.sqlite` (tabelas `curator_runs`, `curator_failures`, `proxy_rotations`) para medir `pbd_success_rate`, tempo médio por candidato e rotação de IP.
+- Executar o roteiro `docs/qa/nightly-smoke.md` após o Discovery Loop noturno: `vvtvctl qa smoke-test` + `vvtvctl qa report --output …/dashboard.html`.
+- Geração de completions (`vvtvctl completions bash|zsh`) recomendada para operadores e agentes CI.
+- Rodar `scripts/optimize_databases.sh /vvtv/data` semanalmente para manter índices e estatísticas (`PRAGMA optimize`, `VACUUM`, `ANALYZE`).
+
 * * *
 
 4) Simulação Humana (Biomecânica)

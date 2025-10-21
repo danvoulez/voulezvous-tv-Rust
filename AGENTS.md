@@ -292,6 +292,22 @@ vvtv-curator discover --url="https://vimeo.com/123456" --debug
 # ✅ Manifest HD capturado: https://vod.vimeo.com/.../master.m3u8
 ```
 
+### Discovery Loop (Implementado)
+
+- **ContentSearcher**: multi-engine (Google, Bing, DuckDuckGo) com heurísticas de vídeo (tags, duração, sinalização "creative commons").
+- **DiscoveryLoop**: controle de cadência (delays configuráveis), estatísticas (`plans_per_run`, `hd_hit_rate`) e `dry-run` para inspeção.
+- **PlanStore**: criação de PLANs com origem `discovery-loop`, atualizando métricas no `plans.sqlite` sob WAL.
+- **CLI**: `vvtvctl discover --query "creative commons" --max-plans 10 --dry-run` gera relatórios estruturados.
+- **Observabilidade**: rotacionar proxies automaticamente (`ip_rotation`) e registrar falhas em `curator_failures.log`.
+
+#### Resiliência & QA — Atualizações Fase 2
+
+- **Fingerprints**: manter canvas/WebGL/audio masking ativos; validar nightly via `docs/qa/nightly-smoke.md`.
+- **Retry policy**: seguir agenda 10min → 45min → 24h e trocar IP após detecção de bot.
+- **QA tooling**: usar `vvtvctl qa smoke-test` + `vvtvctl qa report` diariamente; dashboard HTML precisa ser anexado ao relatório do Discovery Loop.
+- **Shell completions**: operadores podem gerar com `vvtvctl completions bash|zsh` para reduzir erros manuais.
+- **SQLite**: todos os bancos operam em WAL + PRAGMAs (`cache_size`, `mmap_size`, `busy_timeout`). Executar `scripts/optimize_databases.sh /vvtv/data` após longas jornadas.
+
 **Referências:**
 - Bloco II: Browser Automation e Simulação Humana — linhas 400-600
 - Apêndice D.2: browser.toml — linhas 4064-4161

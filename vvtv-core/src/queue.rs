@@ -13,6 +13,7 @@ use rusqlite::{params, Connection, OpenFlags, Row};
 use thiserror::Error;
 
 use crate::config::QueueSection;
+use crate::sqlite::configure_connection;
 
 const QUEUE_SCHEMA: &str = include_str!("../../sql/queue.sql");
 
@@ -264,10 +265,17 @@ impl PlayoutQueueStore {
     }
 
     fn open(&self) -> QueueResult<Connection> {
-        Connection::open_with_flags(&self.path, self.flags).map_err(|source| QueueError::Open {
+        let conn = Connection::open_with_flags(&self.path, self.flags).map_err(|source| {
+            QueueError::Open {
+                source,
+                path: self.path.clone(),
+            }
+        })?;
+        configure_connection(&conn).map_err(|source| QueueError::Open {
             source,
             path: self.path.clone(),
-        })
+        })?;
+        Ok(conn)
     }
 
     pub fn initialize(&self) -> QueueResult<()> {
@@ -580,8 +588,13 @@ impl PlayoutQueueStore {
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> QueueResult<()> {
+        let destination_path = destination.as_ref();
         let source = self.open()?;
-        let mut dest = Connection::open(destination.as_ref())?;
+        let mut dest = Connection::open(destination_path)?;
+        configure_connection(&dest).map_err(|source| QueueError::Open {
+            source,
+            path: destination_path.to_path_buf(),
+        })?;
         let backup = Backup::new(&source, &mut dest)?;
         backup.run_to_completion(10, StdDuration::from_millis(50), None)?;
         Ok(())

@@ -1,3 +1,10 @@
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = -64000;
+PRAGMA temp_store = MEMORY;
+PRAGMA mmap_size = 30000000000;
+PRAGMA busy_timeout = 5000;
+
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS playout_queue (

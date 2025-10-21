@@ -16,7 +16,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{generate, Shell};
 use commands::discover::DiscoverArgs;
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
@@ -136,6 +137,11 @@ pub enum Commands {
     /// Ferramentas de QA
     #[command(subcommand)]
     Qa(QaCommands),
+    /// Gera scripts de autocompletar para shells suportados
+    Completions {
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -450,6 +456,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 render(&report, cli.format)?;
             }
         },
+        Commands::Completions { shell } => {
+            output_completions(*shell)?;
+        }
     }
 
     Ok(())
@@ -481,6 +490,12 @@ where
             Ok(())
         }
     }
+}
+
+fn output_completions(shell: Shell) -> Result<()> {
+    let mut command = Cli::command();
+    generate(shell, &mut command, "vvtvctl", &mut std::io::stdout());
+    Ok(())
 }
 
 fn init_discovery_tracing(enable: bool) {

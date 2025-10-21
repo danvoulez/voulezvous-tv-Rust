@@ -6,7 +6,15 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::sqlite::configure_connection;
+use crate::{
+    distribution::{
+        cdn::{BackupSyncReport, CdnMetrics},
+        edge::EdgeLatencyRecord,
+        replicator::ReplicationReport,
+        security::SegmentToken,
+    },
+    sqlite::configure_connection,
+};
 
 const METRICS_SCHEMA: &str = include_str!("../../sql/metrics.sql");
 
@@ -108,6 +116,99 @@ impl MetricsStore {
         }
         snapshots.reverse();
         Ok(snapshots)
+    }
+
+    pub fn record_replication_report(
+        &self,
+        report: &ReplicationReport,
+    ) -> Result<(), MonitorError> {
+        let mut conn = self.open()?;
+        let tx = conn.transaction()?;
+        for sync in &report.syncs {
+            tx.execute(
+                "INSERT INTO replication_syncs (path, bytes_transferred, duration_ms)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    sync.path.to_string_lossy(),
+                    sync.bytes_transferred as i64,
+                    sync.duration_ms as i64,
+                ],
+            )?;
+        }
+        let check = &report.check;
+        tx.execute(
+            "INSERT INTO replication_events (path, differences, total_files, drift_percent, failover_triggered)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                check.path.to_string_lossy(),
+                check.differences as i64,
+                check.total_files as i64,
+                check.drift_percent,
+                if check.triggered_failover { 1 } else { 0 },
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn record_cdn_metrics(&self, metrics: &CdnMetrics) -> Result<(), MonitorError> {
+        let conn = self.open()?;
+        conn.execute(
+            "INSERT INTO cdn_metrics (provider, cdn_hits, latency_avg_ms, cache_hit_rate, origin_errors)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                metrics.provider.clone(),
+                metrics.cdn_hits as i64,
+                metrics.latency_avg_ms,
+                metrics.cache_hit_rate,
+                metrics.origin_errors as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_backup_sync(&self, report: &BackupSyncReport) -> Result<(), MonitorError> {
+        let conn = self.open()?;
+        conn.execute(
+            "INSERT INTO backup_syncs (provider, files_uploaded, bytes_uploaded, removed_segments, duration_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                report.provider.clone(),
+                report.files_uploaded as i64,
+                report.bytes_uploaded as i64,
+                serde_json::to_string(&report.removed_segments)?,
+                report.duration_ms as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_edge_latency(&self, record: &EdgeLatencyRecord) -> Result<(), MonitorError> {
+        let conn = self.open()?;
+        conn.execute(
+            "INSERT INTO edge_latency (region, target, latency_ms)
+             VALUES (?1, ?2, ?3)",
+            params![
+                record.region.clone(),
+                record.target.clone(),
+                record.latency_ms
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_cdn_token(&self, token: &SegmentToken) -> Result<(), MonitorError> {
+        let conn = self.open()?;
+        conn.execute(
+            "INSERT INTO cdn_tokens (path, token, expires_at)
+             VALUES (?1, ?2, ?3)",
+            params![
+                token.path.clone(),
+                token.token.clone(),
+                token.expires_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
     }
 }
 

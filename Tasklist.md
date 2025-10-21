@@ -236,31 +236,31 @@
 ---
 
 ## Epic H — Distribuição, CDN e Redundância Global
-- ⬜️ **PR H1 — Automação de replicação Origin → Backup (Railway)**
-  - ⬜️ Scripts `rclone sync` e `rclone check` para `/broadcast/hls` e `/storage/ready`.
-  - ⬜️ Monitorar diferenças (>5%) e acionar failover automático.
-  - ⬜️ Configurar jobs (cron/systemd timer) com logs auditáveis.
-  - ⬜️ Documentar política de consistência e verificação.
-- ⬜️ **PR H2 — Integração CDN primária (Cloudflare)**
-  - ⬜️ Configurar DNS, cache rules (TTL 60s), worker script para reescrever host.
-  - ⬜️ Implementar health checks e failover automation via API (switch origin).
-  - ⬜️ Monitorar métricas (`cdn_hits`, `latency_avg`) e gerar relatórios.
-  - ⬜️ Documentar playbook de ban/rate limit.
-- ⬜️ **PR H3 — CDN secundária / backup (Backblaze/Bunny)**
-  - ⬜️ Upload automático de segmentos finalizados (TTL 7 dias) com limpeza baseada em manifest.
-  - ⬜️ Implementar fallback `switch_cdn.sh` e verificação (`dig`, `curl`).
-  - ⬜️ Configurar tokens/assinaturas temporárias para segmentos.
-  - ⬜️ Testar failover manual e automático.
-- ⬜️ **PR H4 — Edge nodes & latency monitoring**
-  - ⬜️ Provisionar script `logline --init-node --role=edge` para novos nós.
-  - ⬜️ Implementar ping/latência periódica (`curl -w "%{time_total}"`).
-  - ⬜️ Buffer local (15 s) + recarregamento automático quando sem segmentos novos.
-  - ⬜️ Mapear latência por região (dashboard heatmap).
-- ⬜️ **PR H5 — Segurança de distribuição (TLS, tokens, firewall)**
-  - ⬜️ Forçar HTTPS/TLS1.3, assinar segmentos (SHA-256 + tokens 5 min).
-  - ⬜️ Configurar firewall (permitir RTMP/HLS apenas via Tailscale/CDN IPs).
-  - ⬜️ Registrar acessos anonimizados e armazenar logs rotativos.
-  - ⬜️ Testar compliance (TLS checkers, security audit).
+- ✅ **PR H1 — Automação de replicação Origin → Backup (Railway)**
+  - ✅ Scripts `rclone sync` e `rclone check` para `/broadcast/hls` e `/storage/ready`.
+  - ✅ Monitorar diferenças (>5%) e acionar failover automático.
+  - ✅ Configurar jobs (cron/systemd timer) com logs auditáveis.
+  - ✅ Documentar política de consistência e verificação.
+- ✅ **PR H2 — Integração CDN primária (Cloudflare)**
+  - ✅ Configurar DNS, cache rules (TTL 60s), worker script para reescrever host.
+  - ✅ Implementar health checks e failover automation via API (switch origin).
+  - ✅ Monitorar métricas (`cdn_hits`, `latency_avg`) e gerar relatórios.
+  - ✅ Documentar playbook de ban/rate limit.
+- ✅ **PR H3 — CDN secundária / backup (Backblaze/Bunny)**
+  - ✅ Upload automático de segmentos finalizados (TTL 7 dias) com limpeza baseada em manifest.
+  - ✅ Implementar fallback `switch_cdn.sh` e verificação (`dig`, `curl`).
+  - ✅ Configurar tokens/assinaturas temporárias para segmentos.
+  - ✅ Testar failover manual e automático.
+- ✅ **PR H4 — Edge nodes & latency monitoring**
+  - ✅ Provisionar script `logline --init-node --role=edge` para novos nós.
+  - ✅ Implementar ping/latência periódica (`curl -w "%{time_total}"`).
+  - ✅ Buffer local (15 s) + recarregamento automático quando sem segmentos novos.
+  - ✅ Mapear latência por região (dashboard heatmap).
+- ✅ **PR H5 — Segurança de distribuição (TLS, tokens, firewall)**
+  - ✅ Forçar HTTPS/TLS1.3, assinar segmentos (SHA-256 + tokens 5 min).
+  - ✅ Configurar firewall (permitir RTMP/HLS apenas via Tailscale/CDN IPs).
+  - ✅ Registrar acessos anonimizados e armazenar logs rotativos.
+  - ✅ Testar compliance (TLS checkers, security audit).
 
 ---
 

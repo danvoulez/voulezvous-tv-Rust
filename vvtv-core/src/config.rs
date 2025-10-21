@@ -15,6 +15,7 @@ pub struct VvtvConfig {
     pub quality: QualitySection,
     pub security: SecuritySection,
     pub monitoring: MonitoringSection,
+    pub distribution: DistributionSection,
     pub economy: EconomySection,
 }
 
@@ -109,6 +110,80 @@ pub struct MonitoringSection {
     pub capture_interval_minutes: u64,
     pub alert_telegram_enabled: bool,
     pub alert_email_enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DistributionSection {
+    pub replication: ReplicationSection,
+    pub cdn_primary: PrimaryCdnSection,
+    pub cdn_backup: BackupCdnSection,
+    pub edge: EdgeSectionConfig,
+    pub security: DistributionSecuritySection,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReplicationSection {
+    pub rclone_path: String,
+    pub remote: String,
+    pub sync_paths: Vec<String>,
+    pub bandwidth_limit_mbps: Option<u64>,
+    pub log_path: String,
+    pub failover_script: String,
+    pub check_threshold_percent: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PrimaryCdnSection {
+    pub provider: String,
+    pub api_base: String,
+    pub zone_id: String,
+    pub account_id: String,
+    pub api_token_path: String,
+    pub dns_record_id: String,
+    pub dns_record_name: String,
+    pub primary_hostname: String,
+    pub backup_hostname: String,
+    pub health_check_url: String,
+    pub manifest_ttl_seconds: u64,
+    pub segment_ttl_seconds: u64,
+    pub metrics_log_path: String,
+    pub worker_script_path: String,
+    pub worker_service: String,
+    pub worker_environment: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BackupCdnSection {
+    pub provider: String,
+    pub rclone_path: String,
+    pub source_paths: Vec<String>,
+    pub remote: String,
+    pub manifest_path: String,
+    pub ttl_days: u64,
+    pub switch_script: String,
+    pub log_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EdgeSectionConfig {
+    pub init_command: String,
+    pub init_args: Vec<String>,
+    pub region: String,
+    pub latency_targets: Vec<String>,
+    pub latency_log_path: String,
+    pub heatmap_output_path: String,
+    pub buffer_seconds: u64,
+    pub reload_threshold_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DistributionSecuritySection {
+    pub tls_required: bool,
+    pub certificate_path: String,
+    pub token_secret_path: String,
+    pub token_ttl_minutes: u64,
+    pub firewall_sources: Vec<String>,
+    pub access_log_path: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -4,6 +4,7 @@ Todas as mudanças notáveis deste repositório serão documentadas aqui.
 
 ## [Unreleased]
 ### Added
+- **PR H1–H5 — Distribuição & CDN**: módulo `distribution`, replicação origin→Railway com failover automático, integrações Cloudflare/B2, scripts CLI (`origin_replication.sh`, `switch_cdn.sh`, `init_edge_node.sh`) e métricas de latência/segurança em `metrics.sqlite`.
 - **PR D7 — Discovery Loop completo**: `ContentSearcher`, `DiscoveryLoop` e comando
   `vvtvctl discover` com estatísticas e modo dry-run.
 - **PR D8 — Resiliência antibot**: `FingerprintMasker`, retries categorizados,

@@ -20,7 +20,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use commands::discover::DiscoverArgs;
 use rusqlite::{Connection, OpenFlags};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use tokio::runtime::Builder;
 use tracing_subscriber::{fmt as tracing_fmt, EnvFilter};
@@ -848,6 +848,7 @@ struct AppContext {
     economy_db: PathBuf,
     viewers_db: PathBuf,
     reports_dir: PathBuf,
+    scripts_dir: PathBuf,
     fill_script: PathBuf,
 }
 
@@ -938,6 +939,7 @@ impl AppContext {
             economy_db,
             viewers_db,
             reports_dir,
+            scripts_dir,
             fill_script,
         })
     }
@@ -1370,12 +1372,20 @@ impl AppContext {
             freeze_events: Some(item.freeze_events),
             black_frame_ratio: Some(item.black_frame_ratio),
             signature_deviation: Some(item.signature_deviation),
+            power_watts: item.power_watts,
+            ups_runtime_minutes: item.ups_runtime_minutes,
+            ups_charge_percent: item.ups_charge_percent,
+            ups_status: item.ups_status.clone(),
+            ssd_wear_percent: item.ssd_wear_percent,
+            gpu_temp_c: item.gpu_temp_c,
+            ssd_temp_c: item.ssd_temp_c,
+            fan_rpm: item.fan_rpm,
         }))
     }
 
     fn record_metrics(&self, queue_metrics: &QueueMetrics) -> Result<()> {
         let store = self.metrics_store()?;
-        let record = MetricRecord {
+        let mut record = MetricRecord {
             buffer_duration_h: queue_metrics.buffer_duration_hours,
             queue_length: queue_metrics.queue_length,
             played_last_hour: queue_metrics.played_last_hour,
@@ -1389,7 +1399,30 @@ impl AppContext {
             freeze_events: 0,
             black_frame_ratio: 0.0,
             signature_deviation: 0.0,
+            power_watts: None,
+            ups_runtime_minutes: None,
+            ups_charge_percent: None,
+            ups_status: None,
+            ssd_wear_percent: None,
+            gpu_temp_c: None,
+            ssd_temp_c: None,
+            fan_rpm: None,
         };
+        if let Some(power) = self.run_json_script::<PowerStatus>("check_power.sh") {
+            record.power_watts = power.power_watts;
+            record.ups_runtime_minutes = power.ups_runtime_minutes;
+            record.ups_charge_percent = power.ups_charge_percent;
+            record.ups_status = power.ups_status;
+        }
+        if let Some(thermal) = self.run_json_script::<ThermalStatus>("check_thermal.sh") {
+            if let Some(cpu_temp) = thermal.cpu_temp_c {
+                record.avg_temp_c = cpu_temp;
+            }
+            record.gpu_temp_c = thermal.gpu_temp_c;
+            record.ssd_temp_c = thermal.ssd_temp_c;
+            record.ssd_wear_percent = thermal.ssd_wear_percent;
+            record.fan_rpm = thermal.fan_rpm;
+        }
         store.record(&record)?;
         Ok(())
     }
@@ -1724,6 +1757,18 @@ impl AppContext {
         let raw = content.trim().parse::<f64>().ok()?;
         Some(raw / 1000.0)
     }
+
+    fn run_json_script<T: DeserializeOwned>(&self, name: &str) -> Option<T> {
+        let path = self.scripts_dir.join(name);
+        if !path.exists() {
+            return None;
+        }
+        let output = Command::new(&path).output().ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        serde_json::from_slice(&output.stdout).ok()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1894,6 +1939,31 @@ pub struct MetricsSnapshot {
     pub freeze_events: Option<i64>,
     pub black_frame_ratio: Option<f64>,
     pub signature_deviation: Option<f64>,
+    pub power_watts: Option<f64>,
+    pub ups_runtime_minutes: Option<f64>,
+    pub ups_charge_percent: Option<f64>,
+    pub ups_status: Option<String>,
+    pub ssd_wear_percent: Option<f64>,
+    pub gpu_temp_c: Option<f64>,
+    pub ssd_temp_c: Option<f64>,
+    pub fan_rpm: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PowerStatus {
+    power_watts: Option<f64>,
+    ups_runtime_minutes: Option<f64>,
+    ups_charge_percent: Option<f64>,
+    ups_status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ThermalStatus {
+    cpu_temp_c: Option<f64>,
+    gpu_temp_c: Option<f64>,
+    ssd_temp_c: Option<f64>,
+    ssd_wear_percent: Option<f64>,
+    fan_rpm: Option<f64>,
 }
 
 impl DisplayFallback for PlanList {

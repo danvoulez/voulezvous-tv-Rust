@@ -294,31 +294,31 @@
 ---
 
 ## Epic J — Maintenance, Security & Long-Term Resilience
-- ⬜️ **PR J1 — Automação de backups (hot/warm/cold)**
-  - ⬜️ Scripts `backup_hot.sh` (1h), `backup_warm.sh` (6h), `backup_cold.sh` (24h) com destinos locais + B2.
-  - ⬜️ Verificações `rclone check` e relatórios (`verify.log`).
-  - ⬜️ Política de retenção (hot 24h, warm 72h, cold 30d) com limpeza automática.
-  - ⬜️ Testar restauração (warm/cold) regularmente.
-- ⬜️ **PR J2 — Self-check diário e autocorreção**
-  - ⬜️ Implementar `/vvtv/system/bin/selfcheck.sh` (integridade DB, disco, temperatura, serviços, NTP).
-  - ⬜️ Automatizar correções (limpar cache, reiniciar serviço, ajustar relógio).
-  - ⬜️ Gerar relatórios JSON (`selfcheck_<date>.json`) e alertas se falha.
-  - ⬜️ Integrar com watchdog para escalonamento.
-- ⬜️ **PR J3 — Segurança computável**
-  - ⬜️ Gerenciar identidades LogLine para cada nó (assinaturas, rotação de chaves, `logline sign`).
-  - ⬜️ Configurar sandboxing (namespaces, cgroups, `chattr +i` em scripts críticos).
-  - ⬜️ Firewall rules (allow 1935/8080/22 via Tailscale) + logging tentativas externas.
-  - ⬜️ Auditoria mensal (`lynis audit system`) com armazenamento de resultados.
-- ⬜️ **PR J4 — Monitoramento físico e aging de hardware**
-  - ⬜️ Registrar ciclos preventivos (ventoinhas trimestrais, SSD SMART, UPS, pasta térmica, rotação Tailscale keys).
-  - ⬜️ Criar scripts de inspeção (`check_power.sh`, `check_thermal.sh`).
-  - ⬜️ Dashboard com indicadores de temperatura, consumo, desgaste SSD.
-  - ⬜️ Documentar procedimentos de manutenção física (checklists diários/mensais/trimestrais).
-- ⬜️ **PR J5 — Disaster recovery runbook automatizado**
-  - ⬜️ Scripts `standby.sh` e `resume.sh` (hibernação/retorno com snapshot).
-  - ⬜️ `logline shutdown --ritual=vvtv` + geração do frame final e manifesto.
-  - ⬜️ `logline revive` para ressuscitar snapshot (testes em hardware alternativo).
-  - ⬜️ Documentar procedimentos legais/institucionais (transferência de custódia, licenças).
+- ✅ **PR J1 — Automação de backups (hot/warm/cold)**
+  - ✅ Scripts `backup_hot.sh` (1h), `backup_warm.sh` (6h), `backup_cold.sh` (24h) com destinos locais + B2.
+  - ✅ Verificações `rclone check` e relatórios (`verify.log`).
+  - ✅ Política de retenção (hot 24h, warm 72h, cold 30d) com limpeza automática.
+  - ✅ Testar restauração (warm/cold) regularmente.
+- ✅ **PR J2 — Self-check diário e autocorreção**
+  - ✅ Implementar `/vvtv/system/bin/selfcheck.sh` (integridade DB, disco, temperatura, serviços, NTP).
+  - ✅ Automatizar correções (limpar cache, reiniciar serviço, ajustar relógio).
+  - ✅ Gerar relatórios JSON (`selfcheck_<date>.json`) e alertas se falha.
+  - ✅ Integrar com watchdog para escalonamento.
+- ✅ **PR J3 — Segurança computável**
+  - ✅ Gerenciar identidades LogLine para cada nó (assinaturas, rotação de chaves, `logline sign`).
+  - ✅ Configurar sandboxing (namespaces, cgroups, `chattr +i` em scripts críticos).
+  - ✅ Firewall rules (allow 1935/8080/22 via Tailscale) + logging tentativas externas.
+  - ✅ Auditoria mensal (`lynis audit system`) com armazenamento de resultados.
+- ✅ **PR J4 — Monitoramento físico e aging de hardware**
+  - ✅ Registrar ciclos preventivos (ventoinhas trimestrais, SSD SMART, UPS, pasta térmica, rotação Tailscale keys).
+  - ✅ Criar scripts de inspeção (`check_power.sh`, `check_thermal.sh`).
+  - ✅ Dashboard com indicadores de temperatura, consumo, desgaste SSD.
+  - ✅ Documentar procedimentos de manutenção física (checklists diários/mensais/trimestrais).
+- ✅ **PR J5 — Disaster recovery runbook automatizado**
+  - ✅ Scripts `standby.sh` e `resume.sh` (hibernação/retorno com snapshot).
+  - ✅ `logline shutdown --ritual=vvtv` + geração do frame final e manifesto.
+  - ✅ `logline revive` para ressuscitar snapshot (testes em hardware alternativo).
+  - ✅ Documentar procedimentos legais/institucionais (transferência de custódia, licenças).
 
 ---
 

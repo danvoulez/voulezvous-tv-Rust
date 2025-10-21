@@ -21,7 +21,15 @@ CREATE TABLE IF NOT EXISTS metrics (
     audio_peak_db REAL,
     freeze_events INTEGER,
     black_frame_ratio REAL,
-    signature_deviation REAL
+    signature_deviation REAL,
+    power_watts REAL,
+    ups_runtime_minutes REAL,
+    ups_charge_percent REAL,
+    ups_status TEXT,
+    ssd_wear_percent REAL,
+    gpu_temp_c REAL,
+    ssd_temp_c REAL,
+    fan_rpm REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(ts DESC);

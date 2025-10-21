@@ -1,9 +1,13 @@
 use std::collections::VecDeque;
 use std::fmt;
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use chrono::{DateTime, Duration, Utc};
+use serde::Deserialize;
 use tokio::process::Command;
 use tracing::warn;
 
@@ -51,6 +55,7 @@ pub struct Watchdog {
     restart_history: Mutex<VecDeque<DateTime<Utc>>>,
     scripts_dir: Option<PathBuf>,
     rtmp_url: String,
+    selfcheck_reports_dir: PathBuf,
 }
 
 impl fmt::Debug for Watchdog {
@@ -71,6 +76,7 @@ impl Watchdog {
         scripts_dir: Option<PathBuf>,
         executor: Option<Arc<dyn CommandExecutor>>,
         rtmp_url: String,
+        selfcheck_reports_dir: Option<PathBuf>,
     ) -> Self {
         let executor = executor.unwrap_or_else(|| Arc::new(SystemCommandExecutor));
         Self {
@@ -81,6 +87,8 @@ impl Watchdog {
             restart_history: Mutex::new(VecDeque::new()),
             scripts_dir,
             rtmp_url,
+            selfcheck_reports_dir: selfcheck_reports_dir
+                .unwrap_or_else(|| PathBuf::from("/vvtv/system/reports")),
         }
     }
 
@@ -124,6 +132,20 @@ impl Watchdog {
             if history.len() as u32 > self.config.restart_max_attempts {
                 actions.push(WatchdogAction::Escalate(
                     "limite de restart excedido em 5 minutos".into(),
+                ));
+            }
+        }
+
+        if let Some(report) = self.latest_selfcheck_report()? {
+            let report_age = Utc::now() - report.timestamp();
+            if report.checks_failed > 0 && report_age < Duration::hours(24) {
+                observations.push(format!(
+                    "selfcheck encontrou {} falhas: {}",
+                    report.checks_failed,
+                    report.issues.join(", ")
+                ));
+                actions.push(WatchdogAction::Escalate(
+                    "selfcheck recente com falhas".into(),
                 ));
             }
         }
@@ -209,5 +231,74 @@ impl Watchdog {
             });
         }
         Ok(())
+    }
+
+    fn latest_selfcheck_report(&self) -> Result<Option<SelfcheckReport>, WatchdogError> {
+        let entries = match fs::read_dir(&self.selfcheck_reports_dir) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(WatchdogError::Io(err)),
+        };
+        let mut latest: Option<(PathBuf, SystemTime)> = None;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if !name.starts_with("selfcheck_") || !name.ends_with(".json") {
+                    continue;
+                }
+            }
+            let metadata = match entry.metadata() {
+                Ok(meta) => meta,
+                Err(_) => continue,
+            };
+            let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            match latest {
+                Some((_, current)) if modified <= current => {}
+                _ => latest = Some((path, modified)),
+            }
+        }
+        let Some((path, modified)) = latest else {
+            return Ok(None);
+        };
+        let data = match fs::read_to_string(&path) {
+            Ok(data) => data,
+            Err(err) => {
+                warn!(path = %path.display(), "falha ao ler selfcheck: {err}");
+                return Ok(None);
+            }
+        };
+        match serde_json::from_str::<SelfcheckReport>(&data) {
+            Ok(mut report) => {
+                if report.timestamp.is_none() {
+                    report.timestamp = Some(DateTime::<Utc>::from(modified));
+                }
+                Ok(Some(report))
+            }
+            Err(err) => {
+                warn!(path = %path.display(), "selfcheck inválido: {err}");
+                Ok(None)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SelfcheckReport {
+    #[serde(default)]
+    timestamp: Option<DateTime<Utc>>,
+    #[serde(default)]
+    checks_failed: u32,
+    #[serde(default)]
+    issues: Vec<String>,
+    #[serde(default)]
+    actions: Vec<String>,
+}
+
+impl SelfcheckReport {
+    fn timestamp(&self) -> DateTime<Utc> {
+        self.timestamp.unwrap_or_else(Utc::now)
     }
 }

@@ -323,16 +323,16 @@
 ---
 
 ## Epic K — Incident Response & Risk Management
-- ⬜️ **PR K1 — Implementar Incident Playbook scripts**
-  - ⬜️ Criar `/vvtv/system/bin` scripts descritos (check_queue, inject_emergency_loop, browser_diagnose, takedown, restart_encoder, switch_cdn, integrity_check, etc.).
-  - ⬜️ Garantir idempotência e logging estruturado (`incident_log.md`).
-  - ⬜️ Adicionar testes básicos (shellcheck, execução dry-run onde aplicável).
-  - ⬜️ Documentar uso rápido (README/cheat-sheet).
-- ⬜️ **PR K2 — Risk register operacional**
-  - ⬜️ Transpor matriz de riscos (R1–R15) para formato vivo (Markdown/JSON) com owners, SLA, mitigação.
-  - ⬜️ Automatizar lembretes de revisão (cron) e checklist de ações (auditorias, testes de buffer, sandbox integrity, etc.).
-  - ⬜️ Integrar com métricas/alertas (ex: buffer <2h → risco R5).
-  - ⬜️ Documentar processo de revisão mensal/quarterly.
+- ✅ **PR K1 — Implementar Incident Playbook scripts**
+  - ✅ Criar `/vvtv/system/bin` scripts descritos (check_queue, inject_emergency_loop, browser_diagnose, takedown, restart_encoder, switch_cdn, integrity_check, etc.).
+  - ✅ Garantir idempotência e logging estruturado (`incident_log.md`).
+  - ✅ Adicionar testes básicos (shellcheck, execução dry-run onde aplicável).
+  - ✅ Documentar uso rápido (README/cheat-sheet).
+- ✅ **PR K2 — Risk register operacional**
+  - ✅ Transpor matriz de riscos (R1–R15) para formato vivo (Markdown/JSON) com owners, SLA, mitigação.
+  - ✅ Automatizar lembretes de revisão (cron) e checklist de ações (auditorias, testes de buffer, sandbox integrity, etc.).
+  - ✅ Integrar com métricas/alertas (ex: buffer <2h → risco R5).
+  - ✅ Documentar processo de revisão mensal/quarterly.
 - ⬜️ **PR K3 — Sistema de comunicação e escalonamento**
   - ⬜️ Integrar Telegram/email para alertas por gravidade (crítico, alto, médio, baixo).
   - ⬜️ Criar templates de postmortem (`VVTV POSTMORTEM — INCIDENT <ID>`).

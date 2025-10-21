@@ -85,7 +85,7 @@ impl Broadcaster {
         paths: BroadcasterPaths,
         executor: Option<Arc<dyn CommandExecutor>>,
     ) -> Self {
-        let executor = executor.unwrap_or_else(|| Arc::new(SystemCommandExecutor::default()));
+        let executor = executor.unwrap_or_else(|| Arc::new(SystemCommandExecutor));
         if let Some(parent) = paths.temp_dir.parent() {
             let _ = fs::create_dir_all(parent);
         }

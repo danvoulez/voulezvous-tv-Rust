@@ -130,6 +130,10 @@ pub struct BrowserConfig {
     pub selectors: SelectorSection,
     pub proxy: ProxySection,
     pub sources: SourcesSection,
+    pub fingerprint: FingerprintSection,
+    pub retry: RetrySection,
+    pub ip_rotation: IpRotationSection,
+    pub observability: ObservabilitySection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -213,6 +217,38 @@ pub struct ProxySection {
 pub struct SourcesSection {
     pub whitelist: Vec<String>,
     pub blacklist: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FingerprintSection {
+    pub enable_canvas_noise: bool,
+    pub enable_webgl_mask: bool,
+    pub enable_audio_mask: bool,
+    pub canvas_noise_range: [i32; 2],
+    pub audio_noise: f64,
+    pub webgl_vendor: Option<String>,
+    pub webgl_renderer: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RetrySection {
+    pub max_attempts: usize,
+    pub schedule_minutes: Vec<u64>,
+    pub jitter_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct IpRotationSection {
+    pub enabled: bool,
+    pub tailscale_binary: String,
+    pub exit_nodes: Vec<String>,
+    pub cooldown_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ObservabilitySection {
+    pub failure_log: String,
+    pub metrics_db: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

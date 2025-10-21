@@ -1,0 +1,18 @@
+{
+  "name": "VoulezVous Default",
+  "primary_palette": [
+    "#1c2028",
+    "#e94560",
+    "#f7f1e3",
+    "#4a5568",
+    "#f0e3ca"
+  ],
+  "target_temperature": 6200.0,
+  "target_saturation": 0.68,
+  "max_deviation": 0.35,
+  "filters": {
+    "contrast": 1.05,
+    "saturation": 1.1
+  },
+  "palette_size": 5
+}

@@ -72,4 +72,10 @@ impl From<std::io::Error> for ProcessorError {
     }
 }
 
+impl From<crate::quality::QualityError> for ProcessorError {
+    fn from(error: crate::quality::QualityError) -> Self {
+        ProcessorError::Qc(error.to_string())
+    }
+}
+
 pub type ProcessorResult<T> = Result<T, ProcessorError>;

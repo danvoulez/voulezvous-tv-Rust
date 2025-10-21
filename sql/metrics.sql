@@ -17,7 +17,11 @@ CREATE TABLE IF NOT EXISTS metrics (
     avg_temp_c REAL,
     latency_s REAL,
     stream_bitrate_mbps REAL,
-    vmaf_live REAL
+    vmaf_live REAL,
+    audio_peak_db REAL,
+    freeze_events INTEGER,
+    black_frame_ratio REAL,
+    signature_deviation REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(ts DESC);

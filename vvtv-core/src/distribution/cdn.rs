@@ -446,7 +446,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .pop()
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no output"))
+                .ok_or_else(|| std::io::Error::other("no output"))
         }
     }
 

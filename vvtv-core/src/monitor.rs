@@ -175,7 +175,6 @@ impl LiveQualityCollector {
             return None;
         }
         let value = String::from_utf8_lossy(&output.stdout)
-            .trim()
             .split_whitespace()
             .next()
             .and_then(|raw| raw.parse::<f64>().ok())?;
@@ -280,7 +279,7 @@ impl LiveQualityCollector {
             let delta = a
                 .iter()
                 .zip(b.iter())
-                .map(|(a, b)| (*a as i16 - *b as i16).abs() as u64)
+                .map(|(a, b)| (*a as i16 - *b as i16).unsigned_abs() as u64)
                 .sum::<u64>();
             if delta > 30 {
                 diff += 1;

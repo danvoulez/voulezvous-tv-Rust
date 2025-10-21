@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 use tempfile::tempdir;
 use vvtv_core::monetization::{
     AdaptiveProgrammer, AudienceStoreBuilder, EconomyEventType, EconomyStoreBuilder,
@@ -9,7 +9,7 @@ use vvtv_core::monetization::{
 use vvtv_core::plan::{Plan, PlanStatus, SqlitePlanStore};
 use vvtv_core::queue::PlayoutQueueStore;
 
-fn setup_plan_store(base: &PathBuf) -> SqlitePlanStore {
+fn setup_plan_store(base: &Path) -> SqlitePlanStore {
     let path = base.join("plans.sqlite");
     let store = SqlitePlanStore::builder()
         .path(&path)
@@ -19,7 +19,7 @@ fn setup_plan_store(base: &PathBuf) -> SqlitePlanStore {
     store
 }
 
-fn setup_queue_store(base: &PathBuf) -> PlayoutQueueStore {
+fn setup_queue_store(base: &Path) -> PlayoutQueueStore {
     let path = base.join("queue.sqlite");
     let store = PlayoutQueueStore::builder()
         .path(&path)

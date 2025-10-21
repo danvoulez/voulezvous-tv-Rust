@@ -11,6 +11,7 @@
 
 pub mod broadcaster;
 pub mod browser;
+pub mod compliance;
 pub mod config;
 pub mod distribution;
 pub mod error;
@@ -37,6 +38,12 @@ pub use browser::{
     QaMetricsStore, QaStatistics, SearchConfig, SearchEngine, SearchResultRaw, SearchSession,
     SearchSessionFactory, SessionRecorder, SessionRecorderConfig, SmokeMode, SmokeTestOptions,
     SmokeTestResult,
+};
+pub use compliance::{
+    ComplianceError, ComplianceResult, ComplianceSuite, ComplianceSuiteConfig, ComplianceSummary,
+    ConsentLogEntry, CsamHashEntry, CsamScanFinding, CsamScanReport, CsamScanner,
+    DrmDetectionConfig, DrmScanFinding, DrmScanReport, DrmScanner, LicenseAuditFinding,
+    LicenseAuditFindingKind, LicenseAuditReport, LicenseAuditSummary, LicenseAuditor,
 };
 pub use config::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,

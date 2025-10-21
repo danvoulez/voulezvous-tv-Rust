@@ -18,6 +18,10 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
+use commands::compliance::{
+    ComplianceAuditArgs, ComplianceCommands, ComplianceCsamArgs, ComplianceDrmArgs,
+    ComplianceSuiteArgs,
+};
 use commands::discover::DiscoverArgs;
 use rusqlite::{Connection, OpenFlags};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -28,16 +32,25 @@ use vvtv_core::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
     AdaptiveProgrammer, AdaptiveReport, AudienceReport, AudienceStore, AudienceStoreBuilder,
     BrowserError, BrowserLauncher, BrowserPbdRunner, BrowserQaRunner, BrowserSearchSessionFactory,
-    ConfigBundle, ContentSearcher, DashboardArtifacts, DashboardError, DashboardGenerator,
-    DiscoveryConfig, DiscoveryLoop, DiscoveryPbd, DiscoveryPlanStore, DiscoveryStats, EconomyError,
-    EconomyEvent, EconomyEventType, EconomyStore, EconomyStoreBuilder, EconomySummary,
-    LedgerExport, MetricRecord, MetricsStore, MicroSpotContract, MicroSpotInjection,
-    MicroSpotManager, MonetizationDashboard, MonitorError, NewEconomyEvent, NewViewerSession, Plan,
-    PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord, PlanMetrics, PlanStatus,
-    PlayBeforeDownload, PlayoutQueueStore, ProfileManager, QaMetricsStore, QaStatistics,
-    QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics, QueueStatus,
-    SearchConfig, SearchEngine, SearchSessionFactory, SessionRecorder, SessionRecorderConfig,
-    SmokeMode, SmokeTestOptions, SmokeTestResult, SqlitePlanStore, ViewerSession,
+    ComplianceError, ComplianceSuite, ComplianceSuiteConfig, ComplianceSummary, ConfigBundle,
+    ContentSearcher, CsamScanReport, CsamScanner, DashboardArtifacts, DashboardError,
+    DashboardGenerator, DiscoveryConfig, DiscoveryLoop, DiscoveryPbd, DiscoveryPlanStore,
+    DiscoveryStats, DrmDetectionConfig, DrmScanReport, DrmScanner, EconomyError, EconomyEvent,
+    EconomyEventType, EconomyStore, EconomyStoreBuilder, EconomySummary, LedgerExport,
+    LicenseAuditReport, LicenseAuditor, MetricRecord, MetricsStore, MicroSpotContract,
+    MicroSpotInjection, MicroSpotManager, MonetizationDashboard, MonitorError, NewEconomyEvent,
+    NewViewerSession, Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord,
+    PlanMetrics, PlanStatus, PlayBeforeDownload, PlayoutQueueStore, ProfileManager, QaMetricsStore,
+    QaStatistics, QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics,
+    QueueStatus, SearchConfig, SearchEngine, SearchSessionFactory, SessionRecorder,
+    SessionRecorderConfig, SmokeMode, SmokeTestOptions, SmokeTestResult, SqlitePlanStore,
+    ViewerSession,
+};
+
+#[cfg(test)]
+use vvtv_core::{
+    CsamScanFinding, DrmScanFinding, LicenseAuditFinding, LicenseAuditFindingKind,
+    LicenseAuditSummary,
 };
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -70,6 +83,8 @@ pub enum AppError {
     Adaptive(#[from] vvtv_core::AdaptiveError),
     #[error("spots error: {0}")]
     Spots(#[from] vvtv_core::SpotsError),
+    #[error("compliance error: {0}")]
+    Compliance(#[from] ComplianceError),
     #[error("authentication failed")]
     Authentication,
     #[error("required resource missing: {0}")]
@@ -160,6 +175,9 @@ pub enum Commands {
     /// Ferramentas de QA
     #[command(subcommand)]
     Qa(QaCommands),
+    /// Auditoria e verificações de compliance
+    #[command(subcommand)]
+    Compliance(ComplianceCommands),
     /// Gera scripts de autocompletar para shells suportados
     Completions {
         #[arg(value_enum)]
@@ -695,6 +713,29 @@ pub fn run(cli: Cli) -> Result<()> {
             QaCommands::Report(args) => {
                 let report = context.qa_report(args)?;
                 render(&report, cli.format)?;
+            }
+        },
+        Commands::Compliance(command) => match command {
+            ComplianceCommands::Audit(args) => {
+                let report = context.compliance_audit(args)?;
+                render(&report, cli.format)?;
+            }
+            ComplianceCommands::Drm(args) => {
+                let report = context.compliance_drm(args)?;
+                render(&report, cli.format)?;
+            }
+            ComplianceCommands::Csam(args) => {
+                let report = context.compliance_csam(args)?;
+                render(&report, cli.format)?;
+            }
+            ComplianceCommands::Suite(args) => {
+                let summary = context.compliance_suite(args)?;
+                render(&summary, cli.format)?;
+                if summary.has_findings() {
+                    eprintln!(
+                        "⚠️  Inconformidades de compliance foram encontradas durante a varredura"
+                    );
+                }
             }
         },
         Commands::Completions { shell } => {
@@ -1758,6 +1799,128 @@ impl AppContext {
         Some(raw / 1000.0)
     }
 
+    fn compliance_audit(&self, args: &ComplianceAuditArgs) -> Result<LicenseAuditReport> {
+        let dir = args
+            .logs_dir
+            .clone()
+            .unwrap_or_else(|| self.compliance_default_logs_dir());
+        let auditor = LicenseAuditor::new(
+            Duration::days(args.expiry_grace_days),
+            Duration::days(args.verification_max_age_days),
+        );
+        Ok(auditor.audit_directory(&dir)?)
+    }
+
+    fn compliance_drm(&self, args: &ComplianceDrmArgs) -> Result<DrmScanReport> {
+        let targets = if let Some(dir) = &args.input {
+            vec![dir.clone()]
+        } else {
+            self.compliance_default_manifest_dirs()
+        };
+        let scanner = DrmScanner::new(DrmDetectionConfig::default());
+        let mut merged = DrmScanReport::default();
+        for dir in targets {
+            let report = scanner.scan_directory(&dir)?;
+            merged.files_scanned += report.files_scanned;
+            merged.findings.extend(report.findings);
+        }
+        Ok(merged)
+    }
+
+    fn compliance_csam(&self, args: &ComplianceCsamArgs) -> Result<CsamScanReport> {
+        let media_dirs = if let Some(dir) = &args.media_dir {
+            vec![dir.clone()]
+        } else {
+            self.compliance_default_media_dirs()
+        };
+        let hash_db = args
+            .hash_db
+            .clone()
+            .unwrap_or_else(|| self.compliance_default_hash_db());
+        let scanner = CsamScanner::from_database(&hash_db)?;
+        let mut merged = CsamScanReport::default();
+        for dir in media_dirs {
+            let report = scanner.scan_directory(&dir)?;
+            merged.files_scanned += report.files_scanned;
+            merged.matches.extend(report.matches);
+        }
+        Ok(merged)
+    }
+
+    fn compliance_suite(&self, args: &ComplianceSuiteArgs) -> Result<ComplianceSummary> {
+        let mut config = ComplianceSuiteConfig::new();
+        config.expiry_grace_days = args.expiry_grace_days;
+        config.verification_max_age_days = args.verification_max_age_days;
+        config.license_logs_dir = args.logs_dir.clone().or_else(|| {
+            let candidate = self.compliance_default_logs_dir();
+            if candidate.exists() {
+                Some(candidate)
+            } else {
+                None
+            }
+        });
+        config.drm_roots = if args.manifests_dir.is_empty() {
+            self.compliance_default_manifest_dirs()
+        } else {
+            args.manifests_dir
+                .iter()
+                .filter(|dir| dir.exists())
+                .cloned()
+                .collect()
+        };
+        config.csam_roots = if args.media_dir.is_empty() {
+            self.compliance_default_media_dirs()
+        } else {
+            args.media_dir
+                .iter()
+                .filter(|dir| dir.exists())
+                .cloned()
+                .collect()
+        };
+        config.csam_hash_db = args.hash_db.clone().or_else(|| {
+            let candidate = self.compliance_default_hash_db();
+            if candidate.exists() {
+                Some(candidate)
+            } else {
+                None
+            }
+        });
+        let suite = ComplianceSuite::new(config);
+        Ok(suite.run()?)
+    }
+
+    fn compliance_default_logs_dir(&self) -> PathBuf {
+        PathBuf::from(&self.bundle.vvtv.paths.vault_dir).join("compliance/license_logs")
+    }
+
+    fn compliance_default_manifest_dirs(&self) -> Vec<PathBuf> {
+        let broadcast_dir = PathBuf::from(&self.bundle.vvtv.paths.broadcast_dir);
+        let storage_ready = PathBuf::from(&self.bundle.vvtv.paths.storage_dir).join("ready");
+        let candidates = vec![
+            broadcast_dir.join("hls"),
+            broadcast_dir.join("vod"),
+            storage_ready.clone(),
+            broadcast_dir.clone(),
+        ];
+        candidates
+            .into_iter()
+            .filter(|path| path.exists())
+            .collect()
+    }
+
+    fn compliance_default_media_dirs(&self) -> Vec<PathBuf> {
+        let ready = PathBuf::from(&self.bundle.vvtv.paths.storage_dir).join("ready");
+        let archive = PathBuf::from(&self.bundle.vvtv.paths.storage_dir).join("archive");
+        vec![ready, archive]
+            .into_iter()
+            .filter(|path| path.exists())
+            .collect()
+    }
+
+    fn compliance_default_hash_db(&self) -> PathBuf {
+        PathBuf::from(&self.bundle.vvtv.paths.vault_dir).join("compliance/csam/hashes.csv")
+    }
+
     fn run_json_script<T: DeserializeOwned>(&self, name: &str) -> Option<T> {
         let path = self.scripts_dir.join(name);
         if !path.exists() {
@@ -2517,6 +2680,146 @@ impl DisplayFallback for DashboardResultView {
     }
 }
 
+impl DisplayFallback for LicenseAuditReport {
+    fn display(&self) -> String {
+        let mut lines = vec![format!(
+            "Entradas auditadas: {} ({} planos)",
+            self.summary.total_entries, self.summary.unique_plans
+        )];
+        if self.findings.is_empty() {
+            lines.push("Nenhuma inconformidade detectada.".to_string());
+        } else {
+            lines.push(format!(
+                "Inconformidades detectadas ({}):",
+                self.findings.len()
+            ));
+            for finding in self.findings.iter().take(10) {
+                lines.push(format!(
+                    "  - [{:?}] {} — {} (ref: {}, arquivo: {})",
+                    finding.kind,
+                    finding.plan_id,
+                    finding.message,
+                    finding.reference_time.to_rfc3339(),
+                    finding.source.display()
+                ));
+            }
+            if self.findings.len() > 10 {
+                lines.push(format!(
+                    "  … +{} findings adicionais",
+                    self.findings.len() - 10
+                ));
+            }
+        }
+        if !self.summary.findings_by_kind.is_empty() {
+            lines.push("Resumo por categoria:".to_string());
+            let mut entries: Vec<_> = self.summary.findings_by_kind.iter().collect();
+            entries.sort_by_key(|(kind, _)| format!("{:?}", kind));
+            for (kind, count) in entries {
+                lines.push(format!("  • {:?}: {}", kind, count));
+            }
+        }
+        lines.join("\n")
+    }
+}
+
+impl DisplayFallback for DrmScanReport {
+    fn display(&self) -> String {
+        let mut lines = vec![format!("Arquivos analisados: {}", self.files_scanned)];
+        if self.findings.is_empty() {
+            lines.push("Nenhuma marca de DRM/EME encontrada.".to_string());
+        } else {
+            lines.push(format!("Marcas suspeitas ({}):", self.findings.len()));
+            for finding in self.findings.iter().take(10) {
+                let snippet = finding
+                    .snippet
+                    .replace('\n', " ")
+                    .chars()
+                    .take(120)
+                    .collect::<String>();
+                lines.push(format!(
+                    "  - {} ⇒ padrão `{}` :: {}",
+                    finding.path.display(),
+                    finding.pattern,
+                    snippet
+                ));
+            }
+            if self.findings.len() > 10 {
+                lines.push(format!(
+                    "  … +{} ocorrências adicionais",
+                    self.findings.len() - 10
+                ));
+            }
+        }
+        lines.join("\n")
+    }
+}
+
+impl DisplayFallback for CsamScanReport {
+    fn display(&self) -> String {
+        let mut lines = vec![format!("Arquivos inspecionados: {}", self.files_scanned)];
+        if self.matches.is_empty() {
+            lines.push("Nenhum hash correspondente encontrado.".to_string());
+        } else {
+            lines.push(format!("Correspondências CSAM ({}):", self.matches.len()));
+            for match_item in self.matches.iter().take(10) {
+                lines.push(format!(
+                    "  - {} ⇒ hash {} [{}]",
+                    match_item.path.display(),
+                    match_item.hash,
+                    match_item.label
+                ));
+            }
+            if self.matches.len() > 10 {
+                lines.push(format!(
+                    "  … +{} correspondências adicionais",
+                    self.matches.len() - 10
+                ));
+            }
+        }
+        lines.join("\n")
+    }
+}
+
+impl DisplayFallback for ComplianceSummary {
+    fn display(&self) -> String {
+        let mut sections = Vec::new();
+        if let Some(report) = &self.license_audit {
+            sections.push("# Auditoria de licenças".to_string());
+            for line in report.display().lines() {
+                sections.push(format!("  {line}"));
+            }
+        } else {
+            sections.push("# Auditoria de licenças: não executada".to_string());
+        }
+
+        if let Some(report) = &self.drm_scan {
+            sections.push("# Varredura DRM/EME".to_string());
+            for line in report.display().lines() {
+                sections.push(format!("  {line}"));
+            }
+        } else {
+            sections.push("# Varredura DRM/EME: não executada".to_string());
+        }
+
+        if let Some(report) = &self.csam_scan {
+            sections.push("# Varredura CSAM".to_string());
+            for line in report.display().lines() {
+                sections.push(format!("  {line}"));
+            }
+        } else {
+            sections.push("# Varredura CSAM: não executada".to_string());
+        }
+
+        let status = if self.has_findings() {
+            "Status geral: ⚠️  Ação requerida"
+        } else {
+            "Status geral: ✅ Em conformidade"
+        };
+        sections.push(status.to_string());
+        sections.join("\n")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2683,8 +2986,8 @@ mod tests {
         let (_temp, context) = prepare_test_context().unwrap();
         let status = context.gather_status().unwrap();
         assert_eq!(status.node.node_name, "vvtv-primary");
-        assert!(status.plan_counts.get("planned").is_some());
-        assert!(status.queue_counts.get("queued").is_some());
+        assert!(status.plan_counts.contains_key("planned"));
+        assert!(status.queue_counts.contains_key("queued"));
         assert!(status.metrics.is_some());
     }
 
@@ -2748,5 +3051,51 @@ mod tests {
         assert!(display.contains("Total runs: 4"));
         assert!(display.contains("Proxy rotations: 5"));
         assert!(display.contains("Bot detections: 2"));
+    }
+
+    #[test]
+    fn compliance_summary_display_mentions_all_sections() {
+        let mut findings_by_kind = std::collections::HashMap::new();
+        findings_by_kind.insert(LicenseAuditFindingKind::MissingProof, 1);
+        let audit = LicenseAuditReport {
+            summary: LicenseAuditSummary {
+                total_entries: 1,
+                unique_plans: 1,
+                findings_by_kind,
+            },
+            findings: vec![LicenseAuditFinding {
+                plan_id: "plan-1".into(),
+                kind: LicenseAuditFindingKind::MissingProof,
+                message: "Registro não possui license_proof".into(),
+                reference_time: Utc::now(),
+                source: PathBuf::from("/tmp/consent.jsonl"),
+            }],
+        };
+        let drm = DrmScanReport {
+            files_scanned: 1,
+            findings: vec![DrmScanFinding {
+                path: PathBuf::from("manifest.m3u8"),
+                pattern: "ext-x-key".into(),
+                snippet: "#EXT-X-KEY:METHOD=AEAD".into(),
+            }],
+        };
+        let csam = CsamScanReport {
+            files_scanned: 1,
+            matches: vec![CsamScanFinding {
+                path: PathBuf::from("clip.mp4"),
+                hash: "deadbeef".into(),
+                label: "alert".into(),
+            }],
+        };
+        let summary = ComplianceSummary {
+            license_audit: Some(audit),
+            drm_scan: Some(drm),
+            csam_scan: Some(csam),
+        };
+        let display = summary.display();
+        assert!(display.contains("Auditoria de licenças"));
+        assert!(display.contains("Varredura DRM/EME"));
+        assert!(display.contains("Varredura CSAM"));
+        assert!(summary.has_findings());
     }
 }

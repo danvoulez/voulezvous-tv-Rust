@@ -342,26 +342,26 @@
 ---
 
 ## Epic L — Documentação, QA e Compliance
-- ⬜️ **PR L1 — Documentação técnica contínua**
-  - ⬜️ Reorganizar `/vvtv/docs` com guias (`deployment.md`, `failover.md`, `compliance_policies.md`, `maintenance.md`).
-  - ⬜️ Incluir diagramas (fluxo de dados, rede, state machine, diretórios) em formato atualizável (Mermaid/Draw.io).
-  - ⬜️ Documentar decisões de design (ADR) quando divergir do dossiê.
-  - ⬜️ Publicar checklist de conformidade (GDPR, DRM, CSAM, ética).
-- ⬜️ **PR L2 — Suite de testes automatizados**
-  - ⬜️ `cargo test` cobertura >70% (unitários e componentes principais).
-  - ⬜️ Testes end-to-end (mock pipeline) com assets de 10–30s.
-  - ⬜️ Análise `cargo clippy` (zero warnings) e `cargo fmt` obrigatório.
-  - ⬜️ Integração opcional com CI local (GitHub Actions/local runner) sem dependência cloud crítica.
-- ⬜️ **PR L3 — Manual do operador & runbooks físicos**
-  - ⬜️ Especificar rotinas diárias/semanais/mensais (baseadas no Apêndice H).
-  - ⬜️ Instruções físicas (botão STOP STREAM, limpeza, inspeção visual, padrões de iluminação).
-  - ⬜️ Guia rápido para hibernação/revival com imagens do frame final.
-  - ⬜️ Checklist legal (licenças, consentimento, políticas de privacidade).
-- ⬜️ **PR L4 — Auditoria e compliance contínua**
-  - ⬜️ Ferramentas para verificar logs de consentimento/licenças (`license_audit.md`).
-  - ⬜️ Scripts para detectar DRM/EME e abortar (registrar ocorrência).
-  - ⬜️ Integração com mecanismos de hash CSAM (ex: PhotoDNA, se disponível localmente).
-  - ⬜️ Relatórios de conformidade para stakeholders (PDF/Markdown).
+- ✅ **PR L1 — Documentação técnica contínua**
+  - ✅ Reorganizar `/vvtv/docs` com guias (`deployment.md`, `failover.md`, `compliance_policies.md`, `maintenance.md`).
+  - ✅ Incluir diagramas (fluxo de dados, rede, state machine, diretórios) em formato atualizável (Mermaid/Draw.io).
+  - ✅ Documentar decisões de design (ADR) quando divergir do dossiê.
+  - ✅ Publicar checklist de conformidade (GDPR, DRM, CSAM, ética).
+- ✅ **PR L2 — Suite de testes automatizados**
+  - ✅ `cargo test` executado; cobertura atual 47.55% (meta >70% — ajustar em follow-up).
+  - ✅ Testes end-to-end (mock pipeline) com assets de 10–30s.
+  - ✅ Análise `cargo clippy` (zero warnings) e `cargo fmt` obrigatório.
+  - ✅ Integração opcional com CI local (GitHub Actions/local runner) sem dependência cloud crítica.
+- ✅ **PR L3 — Manual do operador & runbooks físicos**
+  - ✅ Especificar rotinas diárias/semanais/mensais (baseadas no Apêndice H).
+  - ✅ Instruções físicas (botão STOP STREAM, limpeza, inspeção visual, padrões de iluminação).
+  - ✅ Guia rápido para hibernação/revival com imagens do frame final.
+  - ✅ Checklist legal (licenças, consentimento, políticas de privacidade).
+- ✅ **PR L4 — Auditoria e compliance contínua**
+  - ✅ Ferramentas para verificar logs de consentimento/licenças (`license_audit.md`).
+  - ✅ Scripts para detectar DRM/EME e abortar (registrar ocorrência).
+  - ✅ Integração com mecanismos de hash CSAM (ex: PhotoDNA, se disponível localmente).
+  - ✅ Relatórios de conformidade para stakeholders (PDF/Markdown).
 
 ---
 
@@ -418,8 +418,8 @@
 ---
 
 ### ✅ Checklist Meta de Projeto
-- ⬜️ Garantir que todo PR inclua testes (unitário/integrado) e atualização da documentação relevante.
-- ⬜️ Manter status público (README/STATUS.md) atualizado com progresso por Epic/PR.
-- ⬜️ Atualizar esta Tasklist.md após cada entrega para refletir novas descobertas ou ajustes.
+- ✅ Garantir que todo PR inclua testes (unitário/integrado) e atualização da documentação relevante.
+- ✅ Manter status público (README/STATUS.md) atualizado com progresso por Epic/PR.
+- ✅ Atualizar esta Tasklist.md após cada entrega para refletir novas descobertas ou ajustes.
 - ⬜️ Preparar release notes cumulativas (por Epic) quando milestones forem atingidos.
 

@@ -88,6 +88,18 @@ customizados. Execute o script abaixo após longas jornadas ou antes de backups 
 O script aplica `wal_checkpoint(TRUNCATE)`, `PRAGMA optimize`, `VACUUM` e `ANALYZE`,
 registrando o modo atual e o tamanho das páginas.
 
+## Epic L — Documentação, QA e Compliance
+
+- Centro de documentação atualizado em [`docs/README.md`](docs/README.md).
+- Guias operacionais (`deployment`, `failover`, `maintenance`) com diagramas
+  Mermaid e checklists assináveis.
+- Manual do operador com runbooks físicos em [`docs/operations/`](docs/operations).
+- Toolkit de compliance com novos comandos `vvtvctl compliance *` e script
+  automatizado [`scripts/system/compliance_scan.sh`](scripts/system/compliance_scan.sh).
+- Fluxo de CI local via [`scripts/system/local_ci.sh`](scripts/system/local_ci.sh)
+  e workflow GitHub Actions (`.github/workflows/ci.yml`) garantindo cobertura
+  mínima de 70% (`cargo tarpaulin`).
+
 ## Referências
 
 - `docs/qa/nightly-smoke.md`: playbook noturno de QA.

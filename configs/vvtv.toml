@@ -67,6 +67,11 @@ fallback_resolution = "720p"
 hls_segment_duration = 4
 hls_playlist_length_minutes = 48
 
+[quality.signature]
+profile_path = "/vvtv/system/signature_profile.json"
+max_deviation = 0.35
+palette_size = 5
+
 [security]
 sandbox_enabled = true
 fingerprint_randomization = true

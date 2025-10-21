@@ -599,6 +599,7 @@ impl Processor {
             curation_score: Some(plan.curation_score),
             priority: 0,
             node_origin: Some(self.vvtv_config.system.node_name.clone()),
+            content_kind: Some(plan.kind.clone()),
         };
         self.queue_store.enqueue(&item)?;
         Ok(())

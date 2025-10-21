@@ -14,6 +14,7 @@ pub mod browser;
 pub mod config;
 pub mod distribution;
 pub mod error;
+pub mod monetization;
 pub mod monitor;
 pub mod plan;
 pub mod processor;
@@ -58,14 +59,23 @@ pub use distribution::{
     DistributionCycleReport, DistributionError, DistributionManager,
 };
 pub use error::{ConfigError, Result};
+pub use monetization::{
+    AdaptiveError, AdaptiveProgrammer, AdaptiveReport, AdaptiveResult, AdaptiveUpdate,
+    AudienceError, AudienceMetrics, AudienceReport, AudienceResult, AudienceSnapshot,
+    AudienceStore, AudienceStoreBuilder, DashboardArtifacts, DashboardError, DashboardResult,
+    DesireVector, EconomyError, EconomyEvent, EconomyEventType, EconomyResult, EconomyStore,
+    EconomyStoreBuilder, EconomySummary, LedgerExport, MicroSpotContract, MicroSpotInjection,
+    MicroSpotManager, MonetizationDashboard, NewEconomyEvent, NewViewerSession, SpotsError,
+    SpotsResult, ViewerSession,
+};
 pub use monitor::{
     DashboardGenerator, LiveQcSample, LiveQualityCollector, MetricRecord, MetricSnapshot,
     MetricsStore, MonitorError, QcReportGenerator, VisualReviewPanel,
 };
 pub use plan::{
-    Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanError, PlanImportRecord,
-    PlanMetrics, PlanResult, PlanSelectionDecision, PlanStatus, Planner, PlannerConfig,
-    PlannerEvent, RealizationOutcome, Realizer, RealizerConfig, SqlitePlanStore,
+    Plan, PlanAdaptiveUpdate, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanError,
+    PlanImportRecord, PlanMetrics, PlanResult, PlanSelectionDecision, PlanStatus, Planner,
+    PlannerConfig, PlannerEvent, RealizationOutcome, Realizer, RealizerConfig, SqlitePlanStore,
     SqlitePlanStoreBuilder,
 };
 pub use processor::{

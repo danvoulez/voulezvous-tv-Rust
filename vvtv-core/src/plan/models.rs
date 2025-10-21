@@ -83,6 +83,8 @@ pub struct Plan {
     pub failure_count: i64,
     pub tags: Vec<String>,
     pub trending_score: f64,
+    pub desire_vector: Option<Vec<f32>>,
+    pub engagement_score: f64,
 }
 
 impl Plan {
@@ -104,6 +106,8 @@ impl Plan {
             failure_count: 0,
             tags: Vec::new(),
             trending_score: 0.0,
+            desire_vector: None,
+            engagement_score: 0.0,
         }
     }
 
@@ -111,6 +115,7 @@ impl Plan {
         let created_at: Option<NaiveDateTime> = row.get("created_at")?;
         let updated_at: Option<NaiveDateTime> = row.get("updated_at")?;
         let tags: Option<String> = row.get("tags")?;
+        let desire_vector_raw: Option<String> = row.get("desire_vector")?;
         Ok(Self {
             plan_id: row.get("plan_id")?,
             created_at: created_at.map(|dt| Utc.from_utc_datetime(&dt)),
@@ -142,6 +147,11 @@ impl Plan {
                 })
                 .unwrap_or_default(),
             trending_score: row.get::<_, Option<f64>>("trending_score")?.unwrap_or(0.0),
+            desire_vector: desire_vector_raw
+                .and_then(|value| serde_json::from_str::<Vec<f32>>(&value).ok()),
+            engagement_score: row
+                .get::<_, Option<f64>>("engagement_score")?
+                .unwrap_or(0.0),
         })
     }
 
@@ -151,6 +161,12 @@ impl Plan {
         } else {
             Some(tags.join(","))
         }
+    }
+
+    pub fn serialize_desire_vector(vector: &Option<Vec<f32>>) -> Option<String> {
+        vector
+            .as_ref()
+            .and_then(|values| serde_json::to_string(values).ok())
     }
 }
 
@@ -190,6 +206,14 @@ pub struct PlanAuditFinding {
     pub status: PlanStatus,
     pub age_hours: f64,
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlanAdaptiveUpdate {
+    pub plan_id: String,
+    pub curation_score: f64,
+    pub desire_vector: Option<Vec<f32>>,
+    pub engagement_score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

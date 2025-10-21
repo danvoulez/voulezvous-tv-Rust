@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS plans (
     updated_at DATETIME,
     failure_count INTEGER DEFAULT 0,
     tags TEXT,
-    trending_score REAL DEFAULT 0.0
+    trending_score REAL DEFAULT 0.0,
+    desire_vector TEXT,
+    engagement_score REAL DEFAULT 0.0
 );
 
 CREATE INDEX IF NOT EXISTS idx_plans_status ON plans(status);

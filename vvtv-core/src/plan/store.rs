@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use chrono::{TimeZone, Utc};
+use chrono::{Duration, TimeZone, Utc};
 use uuid::Uuid;
 
 use crate::browser::{Candidate, PbdOutcome};
@@ -9,8 +9,8 @@ use crate::sqlite::configure_connection;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use super::models::{
-    Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord, PlanMetrics,
-    PlanSelectionDecision, PlanStatus,
+    Plan, PlanAdaptiveUpdate, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry,
+    PlanImportRecord, PlanMetrics, PlanSelectionDecision, PlanStatus,
 };
 use super::{PlanError, PlanResult};
 
@@ -158,11 +158,11 @@ impl SqlitePlanStore {
             "INSERT INTO plans (
                 plan_id, kind, title, source_url, duration_est_s, resolution_observed,
                 curation_score, status, license_proof, hd_missing, node_origin, updated_at,
-                failure_count, tags, trending_score
+                failure_count, tags, trending_score, desire_vector, engagement_score
             ) VALUES (
                 :plan_id, :kind, :title, :source_url, :duration_est_s, :resolution_observed,
                 :curation_score, :status, :license_proof, :hd_missing, :node_origin, :updated_at,
-                :failure_count, :tags, :trending_score
+                :failure_count, :tags, :trending_score, :desire_vector, :engagement_score
             )
             ON CONFLICT(plan_id) DO UPDATE SET
                 kind = excluded.kind,
@@ -178,7 +178,9 @@ impl SqlitePlanStore {
                 updated_at = excluded.updated_at,
                 failure_count = excluded.failure_count,
                 tags = excluded.tags,
-                trending_score = excluded.trending_score",
+                trending_score = excluded.trending_score,
+                desire_vector = excluded.desire_vector,
+                engagement_score = excluded.engagement_score",
             params![
                 &plan.plan_id,
                 &plan.kind,
@@ -195,6 +197,8 @@ impl SqlitePlanStore {
                 plan.failure_count,
                 Plan::serialize_tags(&plan.tags),
                 plan.trending_score,
+                Plan::serialize_desire_vector(&plan.desire_vector),
+                plan.engagement_score,
             ],
         )?;
         Ok(())
@@ -207,6 +211,64 @@ impl SqlitePlanStore {
             .query_row([plan_id], |row| Plan::from_row(row))
             .optional()?;
         Ok(plan)
+    }
+
+    pub fn apply_adaptive_feedback(&self, updates: &[PlanAdaptiveUpdate]) -> PlanResult<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.open()?;
+        let tx = conn.transaction()?;
+        for update in updates {
+            tx.execute(
+                "UPDATE plans
+                 SET curation_score = ?2,
+                     desire_vector = ?3,
+                     engagement_score = ?4,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE plan_id = ?1",
+                params![
+                    &update.plan_id,
+                    update.curation_score,
+                    Plan::serialize_desire_vector(&update.desire_vector),
+                    update.engagement_score,
+                ],
+            )?;
+            tx.execute(
+                "INSERT INTO plan_attempts(plan_id, status_from, status_to, note)
+                 VALUES (?1, 'planned', 'planned', 'adaptive-feedback')",
+                params![&update.plan_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn top_tags(&self, window: Duration, limit: usize) -> PlanResult<Vec<(String, usize)>> {
+        let conn = self.open()?;
+        let since = Utc::now() - window;
+        let mut stmt = conn.prepare(
+            "SELECT tags FROM plans
+             WHERE created_at >= ?1 AND tags IS NOT NULL",
+        )?;
+        let mut rows = stmt.query([since.naive_utc()])?;
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        while let Some(row) = rows.next()? {
+            let tags: Option<String> = row.get(0)?;
+            if let Some(tags) = tags {
+                for tag in tags
+                    .split(',')
+                    .map(|item| item.trim())
+                    .filter(|item| !item.is_empty())
+                {
+                    *counts.entry(tag.to_string()).or_insert(0) += 1;
+                }
+            }
+        }
+        let mut entries: Vec<_> = counts.into_iter().collect();
+        entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        entries.truncate(limit);
+        Ok(entries)
     }
 
     pub fn delete(&self, plan_id: &str) -> PlanResult<()> {

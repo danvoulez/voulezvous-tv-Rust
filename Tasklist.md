@@ -265,31 +265,31 @@
 ---
 
 ## Epic I — Monetização, Analytics & Adaptive Programming
-- ⬜️ **PR I1 — Ledger econômico computável**
-  - ⬜️ Implementar `EconomyStore` com eventos (`view`, `click`, `slot_sell`, `affiliate`, `cost`, `payout`).
-  - ⬜️ Calcular hashes SHA-256 assinados (LogLine) por evento.
-  - ⬜️ Exportar `.csv` e `.logline` semanais (`ledger_week_<date>.csv`).
-  - ⬜️ Testes unitários (soma valores, reconciliação).
-- ⬜️ **PR I2 — Coleta de métricas de audiência (`viewers.sqlite`)**
-  - ⬜️ Registrar sessões (join/leave, duração, região, device, bandwidth, engagement_score).
-  - ⬜️ Calcular derivados (`retention_5min`, `retention_30min`, `avg_duration`).
-  - ⬜️ Gerar heatmap geográfico (PNG) e relatórios JSON.
-  - ⬜️ Garantir anonimização (sem PII, modo ghost).
-- ⬜️ **PR I3 — Motor de programação adaptativa**
-  - ⬜️ Ajustar `planner` com base em retention, geo, new vs returning, desire vectors.
-  - ⬜️ Implementar `desire_vector` por vídeo (integração com LogLine LLM local).
-  - ⬜️ Atualizar `curation_score` dinamicamente e logs de decisão.
-  - ⬜️ Testes de simulação (cenários com quedas/altos de retenção).
-- ⬜️ **PR I4 — Gestão de micro-spots e slots premium**
-  - ⬜️ Representar contratos `.lll` com duração, estilo visual, sponsor, value_eur.
-  - ⬜️ Injetar microspots a cada 25–40 min sem quebrar ritmo (respeitar fades).
-  - ⬜️ Registrar entregas no ledger e gerar relatórios financeiros diários.
-  - ⬜️ Ferramentas CLI para agendamento/cancelamento de spots.
-- ⬜️ **PR I5 — Dashboards de monetização e tendências**
-  - ⬜️ `/monitor/` com gráficos de receita/hora, engajamento, heatmap.
-  - ⬜️ `trends_weekly.json` com top tags, desire vectors médios por região.
-  - ⬜️ Integração com agente curador (`agent_curador.lll`) para reprogramação automática.
-  - ⬜️ Alertas quando ROI < limiar ou custos > orçamento.
+- ✅ **PR I1 — Ledger econômico computável**
+  - ✅ Implementar `EconomyStore` com eventos (`view`, `click`, `slot_sell`, `affiliate`, `cost`, `payout`).
+  - ✅ Calcular hashes SHA-256 assinados (LogLine) por evento.
+  - ✅ Exportar `.csv` e `.logline` semanais (`ledger_week_<date>.csv`).
+  - ✅ Testes unitários (soma valores, reconciliação).
+- ✅ **PR I2 — Coleta de métricas de audiência (`viewers.sqlite`)**
+  - ✅ Registrar sessões (join/leave, duração, região, device, bandwidth, engagement_score).
+  - ✅ Calcular derivados (`retention_5min`, `retention_30min`, `avg_duration`).
+  - ✅ Gerar heatmap geográfico (PNG) e relatórios JSON.
+  - ✅ Garantir anonimização (sem PII, modo ghost).
+- ✅ **PR I3 — Motor de programação adaptativa**
+  - ✅ Ajustar `planner` com base em retention, geo, new vs returning, desire vectors.
+  - ✅ Implementar `desire_vector` por vídeo (integração com LogLine LLM local).
+  - ✅ Atualizar `curation_score` dinamicamente e logs de decisão.
+  - ✅ Testes de simulação (cenários com quedas/altos de retenção).
+- ✅ **PR I4 — Gestão de micro-spots e slots premium**
+  - ✅ Representar contratos `.lll` com duração, estilo visual, sponsor, value_eur.
+  - ✅ Injetar microspots a cada 25–40 min sem quebrar ritmo (respeitar fades).
+  - ✅ Registrar entregas no ledger e gerar relatórios financeiros diários.
+  - ✅ Ferramentas CLI para agendamento/cancelamento de spots.
+- ✅ **PR I5 — Dashboards de monetização e tendências**
+  - ✅ `/monitor/` com gráficos de receita/hora, engajamento, heatmap.
+  - ✅ `trends_weekly.json` com top tags, desire vectors médios por região.
+  - ✅ Integração com agente curador (`agent_curador.lll`) para reprogramação automática.
+  - ✅ Alertas quando ROI < limiar ou custos > orçamento.
 
 ---
 

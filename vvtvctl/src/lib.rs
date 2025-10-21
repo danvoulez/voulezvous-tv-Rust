@@ -26,14 +26,18 @@ use tokio::runtime::Builder;
 use tracing_subscriber::{fmt as tracing_fmt, EnvFilter};
 use vvtv_core::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
+    AdaptiveProgrammer, AdaptiveReport, AudienceReport, AudienceStore, AudienceStoreBuilder,
     BrowserError, BrowserLauncher, BrowserPbdRunner, BrowserQaRunner, BrowserSearchSessionFactory,
-    ConfigBundle, ContentSearcher, DashboardGenerator, DiscoveryConfig, DiscoveryLoop,
-    DiscoveryPbd, DiscoveryPlanStore, DiscoveryStats, MetricRecord, MetricsStore, MonitorError,
-    Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord, PlanMetrics,
-    PlanStatus, PlayBeforeDownload, PlayoutQueueStore, ProfileManager, QaMetricsStore,
-    QaStatistics, QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics,
-    QueueStatus, SearchConfig, SearchEngine, SearchSessionFactory, SessionRecorder,
-    SessionRecorderConfig, SmokeMode, SmokeTestOptions, SmokeTestResult, SqlitePlanStore,
+    ConfigBundle, ContentSearcher, DashboardArtifacts, DashboardError, DashboardGenerator,
+    DiscoveryConfig, DiscoveryLoop, DiscoveryPbd, DiscoveryPlanStore, DiscoveryStats, EconomyError,
+    EconomyEvent, EconomyEventType, EconomyStore, EconomyStoreBuilder, EconomySummary,
+    LedgerExport, MetricRecord, MetricsStore, MicroSpotContract, MicroSpotInjection,
+    MicroSpotManager, MonetizationDashboard, MonitorError, NewEconomyEvent, NewViewerSession, Plan,
+    PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord, PlanMetrics, PlanStatus,
+    PlayBeforeDownload, PlayoutQueueStore, ProfileManager, QaMetricsStore, QaStatistics,
+    QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics, QueueStatus,
+    SearchConfig, SearchEngine, SearchSessionFactory, SessionRecorder, SessionRecorderConfig,
+    SmokeMode, SmokeTestOptions, SmokeTestResult, SqlitePlanStore, ViewerSession,
 };
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -56,6 +60,16 @@ pub enum AppError {
     Monitor(#[from] MonitorError),
     #[error("browser automation error: {0}")]
     Browser(#[from] BrowserError),
+    #[error("economy error: {0}")]
+    Economy(#[from] vvtv_core::EconomyError),
+    #[error("audience error: {0}")]
+    Audience(#[from] vvtv_core::AudienceError),
+    #[error("dashboard error: {0}")]
+    Dashboard(#[from] DashboardError),
+    #[error("adaptive error: {0}")]
+    Adaptive(#[from] vvtv_core::AdaptiveError),
+    #[error("spots error: {0}")]
+    Spots(#[from] vvtv_core::SpotsError),
     #[error("authentication failed")]
     Authentication,
     #[error("required resource missing: {0}")]
@@ -96,6 +110,15 @@ pub struct Cli {
     /// Caminho alternativo para metrics.sqlite
     #[arg(long)]
     pub metrics_db: Option<PathBuf>,
+    /// Caminho alternativo para economy.sqlite
+    #[arg(long)]
+    pub economy_db: Option<PathBuf>,
+    /// Caminho alternativo para viewers.sqlite
+    #[arg(long)]
+    pub viewers_db: Option<PathBuf>,
+    /// Diretório para relatórios de monetização
+    #[arg(long)]
+    pub reports_dir: Option<PathBuf>,
     /// Caminho alternativo para o script fill_buffer.sh
     #[arg(long)]
     pub fill_script: Option<PathBuf>,
@@ -142,6 +165,9 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+    /// Operações de monetização e analytics
+    #[command(subcommand)]
+    Monetization(MonetizationCommands),
 }
 
 #[derive(Subcommand, Debug)]
@@ -367,6 +393,221 @@ pub struct QaReportResult {
     pub stats: QaStatistics,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LedgerRecordResult {
+    pub event: EconomyEvent,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LedgerSummaryResult {
+    pub summary: EconomySummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LedgerExportResult {
+    pub export: LedgerExport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AudienceRecordResult {
+    pub session: ViewerSession,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AudienceMetricsResult {
+    pub report: AudienceReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AudienceHeatmapResult {
+    pub output: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AudienceReportResultView {
+    pub path: PathBuf,
+    pub report: AudienceReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdaptiveReportView {
+    pub report: AdaptiveReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpotListResult {
+    pub contracts: Vec<MicroSpotContract>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpotActionResult {
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpotInjectionResult {
+    pub injections: Vec<MicroSpotInjection>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DashboardResultView {
+    pub artifacts: DashboardArtifacts,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MonetizationCommands {
+    /// Operações no ledger econômico
+    #[command(subcommand)]
+    Ledger(LedgerCommands),
+    /// Registrar e consultar métricas de audiência
+    #[command(subcommand)]
+    Audience(AudienceCommands),
+    /// Atualiza scores de curadoria com base em retenção e receita
+    Adaptive,
+    /// Gerencia micro-spots e slots premium
+    #[command(subcommand)]
+    Spots(SpotCommands),
+    /// Gera dashboard HTML/JSON de monetização
+    Dashboard(DashboardArgs),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LedgerCommands {
+    /// Registra um evento financeiro
+    Record(LedgerRecordArgs),
+    /// Exibe resumo financeiro
+    Summary(LedgerSummaryArgs),
+    /// Exporta CSV e .logline do período
+    Export(LedgerExportArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct LedgerRecordArgs {
+    /// Tipo do evento (view, click, slot_sell, affiliate, cost, payout)
+    pub event_type: String,
+    /// Valor em euros
+    pub value_eur: f64,
+    /// Origem do evento (viewer, campanha...)
+    #[arg(long)]
+    pub source: String,
+    /// Contexto associado (plan_id, campanha)
+    #[arg(long)]
+    pub context: String,
+    /// Observações opcionais
+    #[arg(long)]
+    pub notes: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct LedgerSummaryArgs {
+    /// Intervalo em horas (padrão 24h)
+    #[arg(long, default_value_t = 24)]
+    pub hours: i64,
+}
+
+#[derive(Args, Debug)]
+pub struct LedgerExportArgs {
+    /// Início do período (RFC3339). Padrão: agora - 7 dias.
+    #[arg(long)]
+    pub start: Option<String>,
+    /// Fim do período (RFC3339). Padrão: agora.
+    #[arg(long)]
+    pub end: Option<String>,
+    /// Diretório de saída
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AudienceCommands {
+    /// Registra sessão de audiência
+    Record(AudienceRecordArgs),
+    /// Resumo de métricas agregadas
+    Metrics(AudienceMetricsArgs),
+    /// Gera heatmap geográfico
+    Heatmap(AudienceHeatmapArgs),
+    /// Exporta relatório JSON
+    Report(AudienceReportArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct AudienceRecordArgs {
+    /// Identificador da sessão
+    pub session_id: String,
+    /// Região (EU, NA, SA, ...)
+    #[arg(long)]
+    pub region: String,
+    /// Dispositivo
+    #[arg(long)]
+    pub device: String,
+    /// Duração em minutos
+    #[arg(long, default_value_t = 10.0)]
+    pub duration_minutes: f64,
+    /// Banda média (Mbps)
+    #[arg(long)]
+    pub bandwidth_mbps: Option<f64>,
+    /// Score de engajamento (0-1)
+    #[arg(long)]
+    pub engagement: Option<f64>,
+}
+
+#[derive(Args, Debug)]
+pub struct AudienceMetricsArgs {
+    /// Intervalo em horas (padrão 24h)
+    #[arg(long, default_value_t = 24)]
+    pub hours: i64,
+}
+
+#[derive(Args, Debug)]
+pub struct AudienceHeatmapArgs {
+    /// Caminho de saída para o PNG
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct AudienceReportArgs {
+    /// Caminho do relatório JSON
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+    /// Intervalo em horas (padrão 24h)
+    #[arg(long, default_value_t = 24)]
+    pub hours: i64,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SpotCommands {
+    /// Lista contratos de micro-spot
+    List,
+    /// Carrega contrato .lll
+    Load(SpotLoadArgs),
+    /// Ativa contrato
+    Activate(SpotToggleArgs),
+    /// Desativa contrato
+    Deactivate(SpotToggleArgs),
+    /// Injeta microspots devidos
+    Inject,
+}
+
+#[derive(Args, Debug)]
+pub struct SpotLoadArgs {
+    /// Caminho do arquivo .lll
+    pub path: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct SpotToggleArgs {
+    /// ID do contrato
+    pub id: String,
+}
+
+#[derive(Args, Debug)]
+pub struct DashboardArgs {
+    /// Diretório de saída (padrão monitor/)
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+}
+
 pub fn run(cli: Cli) -> Result<()> {
     enforce_token(&cli)?;
     let context = AppContext::new(&cli)?;
@@ -459,6 +700,70 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Completions { shell } => {
             output_completions(*shell)?;
         }
+        Commands::Monetization(command) => match command {
+            MonetizationCommands::Ledger(sub) => match sub {
+                LedgerCommands::Record(args) => {
+                    let result = context.ledger_record(args)?;
+                    render(&result, cli.format)?;
+                }
+                LedgerCommands::Summary(args) => {
+                    let result = context.ledger_summary(args)?;
+                    render(&result, cli.format)?;
+                }
+                LedgerCommands::Export(args) => {
+                    let result = context.ledger_export(args)?;
+                    render(&result, cli.format)?;
+                }
+            },
+            MonetizationCommands::Audience(sub) => match sub {
+                AudienceCommands::Record(args) => {
+                    let result = context.audience_record(args)?;
+                    render(&result, cli.format)?;
+                }
+                AudienceCommands::Metrics(args) => {
+                    let result = context.audience_metrics(args)?;
+                    render(&result, cli.format)?;
+                }
+                AudienceCommands::Heatmap(args) => {
+                    let result = context.audience_heatmap(args)?;
+                    render(&result, cli.format)?;
+                }
+                AudienceCommands::Report(args) => {
+                    let result = context.audience_report(args)?;
+                    render(&result, cli.format)?;
+                }
+            },
+            MonetizationCommands::Adaptive => {
+                let result = context.run_adaptive()?;
+                render(&result, cli.format)?;
+            }
+            MonetizationCommands::Spots(sub) => match sub {
+                SpotCommands::List => {
+                    let result = context.spots_list()?;
+                    render(&result, cli.format)?;
+                }
+                SpotCommands::Load(args) => {
+                    let result = context.spots_load(args)?;
+                    render(&result, cli.format)?;
+                }
+                SpotCommands::Activate(args) => {
+                    let result = context.spots_toggle(args, true)?;
+                    render(&result, cli.format)?;
+                }
+                SpotCommands::Deactivate(args) => {
+                    let result = context.spots_toggle(args, false)?;
+                    render(&result, cli.format)?;
+                }
+                SpotCommands::Inject => {
+                    let result = context.spots_inject()?;
+                    render(&result, cli.format)?;
+                }
+            },
+            MonetizationCommands::Dashboard(args) => {
+                let result = context.generate_dashboard(args)?;
+                render(&result, cli.format)?;
+            }
+        },
     }
 
     Ok(())
@@ -510,6 +815,21 @@ fn init_discovery_tracing(enable: bool) {
     let _ = tracing_fmt().with_env_filter(filter).try_init();
 }
 
+fn parse_event_type(value: &str) -> Result<EconomyEventType> {
+    EconomyEventType::from_str(value).map_err(|err| match err {
+        EconomyError::InvalidEventType(_) => {
+            AppError::InvalidArgument(format!("tipo de evento inválido: {value}"))
+        }
+        other => AppError::Economy(other),
+    })
+}
+
+fn parse_datetime(value: &str) -> Result<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|err| AppError::InvalidArgument(format!("data/hora inválida '{value}': {err}")))
+}
+
 trait DisplayFallback {
     fn display(&self) -> String;
 }
@@ -525,6 +845,9 @@ struct AppContext {
     plans_db: PathBuf,
     queue_db: PathBuf,
     metrics_db: PathBuf,
+    economy_db: PathBuf,
+    viewers_db: PathBuf,
+    reports_dir: PathBuf,
     fill_script: PathBuf,
 }
 
@@ -585,6 +908,18 @@ impl AppContext {
             .metrics_db
             .clone()
             .unwrap_or_else(|| data_dir.join("metrics.sqlite"));
+        let economy_db = cli
+            .economy_db
+            .clone()
+            .unwrap_or_else(|| data_dir.join("economy.sqlite"));
+        let viewers_db = cli
+            .viewers_db
+            .clone()
+            .unwrap_or_else(|| data_dir.join("viewers.sqlite"));
+        let reports_dir = cli.reports_dir.clone().unwrap_or_else(|| {
+            let base = PathBuf::from(&bundle.vvtv.paths.base_dir);
+            base.join("monitor")
+        });
         let fill_script = cli
             .fill_script
             .clone()
@@ -600,6 +935,9 @@ impl AppContext {
             plans_db,
             queue_db,
             metrics_db,
+            economy_db,
+            viewers_db,
+            reports_dir,
             fill_script,
         })
     }
@@ -968,6 +1306,52 @@ impl AppContext {
         Ok(store)
     }
 
+    fn economy_store(&self, read_only: bool) -> Result<EconomyStore> {
+        if let Some(parent) = self.economy_db.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if read_only && !self.economy_db.exists() {
+            let bootstrap = EconomyStoreBuilder::new().path(&self.economy_db).build()?;
+            bootstrap.ensure_schema()?;
+        }
+        let mut builder = EconomyStoreBuilder::new().path(&self.economy_db);
+        if read_only {
+            builder = builder.read_only(true);
+        }
+        let store = builder.build()?;
+        if !read_only {
+            store.ensure_schema()?;
+        }
+        Ok(store)
+    }
+
+    fn audience_store(&self, read_only: bool) -> Result<AudienceStore> {
+        if let Some(parent) = self.viewers_db.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if read_only && !self.viewers_db.exists() {
+            let bootstrap = AudienceStoreBuilder::new().path(&self.viewers_db).build()?;
+            bootstrap.initialize()?;
+        }
+        let mut builder = AudienceStoreBuilder::new().path(&self.viewers_db);
+        if read_only {
+            builder = builder.read_only(true);
+        }
+        let store = builder.build()?;
+        if !read_only {
+            store.initialize()?;
+        }
+        Ok(store)
+    }
+
+    fn monetization_reports_dir(&self) -> PathBuf {
+        if let Some(parent) = self.reports_dir.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::create_dir_all(&self.reports_dir);
+        self.reports_dir.clone()
+    }
+
     fn metrics_snapshot(&self) -> Result<Option<MetricsSnapshot>> {
         let store = self.metrics_store()?;
         let snapshot = store.latest()?;
@@ -1008,6 +1392,153 @@ impl AppContext {
         };
         store.record(&record)?;
         Ok(())
+    }
+
+    fn ledger_record(&self, args: &LedgerRecordArgs) -> Result<LedgerRecordResult> {
+        let mut event = NewEconomyEvent::new(
+            parse_event_type(&args.event_type)?,
+            args.value_eur,
+            args.source.clone(),
+            args.context.clone(),
+        );
+        event.notes = args.notes.clone();
+        let store = self.economy_store(false)?;
+        let recorded = store.record_event(&event)?;
+        Ok(LedgerRecordResult { event: recorded })
+    }
+
+    fn ledger_summary(&self, args: &LedgerSummaryArgs) -> Result<LedgerSummaryResult> {
+        let hours = args.hours.max(1);
+        let store = self.economy_store(true)?;
+        let end = Utc::now();
+        let start = end - Duration::hours(hours);
+        let summary = store.summarize(start, end)?;
+        Ok(LedgerSummaryResult { summary })
+    }
+
+    fn ledger_export(&self, args: &LedgerExportArgs) -> Result<LedgerExportResult> {
+        let store = self.economy_store(true)?;
+        let end = args
+            .end
+            .as_ref()
+            .map(|value| parse_datetime(value))
+            .transpose()?
+            .unwrap_or_else(Utc::now);
+        let start = args
+            .start
+            .as_ref()
+            .map(|value| parse_datetime(value))
+            .transpose()?
+            .unwrap_or_else(|| end - Duration::days(7));
+        let output_dir = args
+            .output
+            .clone()
+            .unwrap_or_else(|| self.monetization_reports_dir());
+        fs::create_dir_all(&output_dir)?;
+        let export = store.export_ledger(start, end, &output_dir)?;
+        Ok(LedgerExportResult { export })
+    }
+
+    fn audience_record(&self, args: &AudienceRecordArgs) -> Result<AudienceRecordResult> {
+        let mut session = NewViewerSession::new(&args.session_id, &args.region, &args.device);
+        let duration = Duration::minutes(args.duration_minutes.max(0.5) as i64);
+        session.leave_time = Some(session.join_time + duration);
+        session.bandwidth_mbps = args.bandwidth_mbps;
+        session.engagement_score = args.engagement.map(|v| v.clamp(0.0, 1.0));
+        let store = self.audience_store(false)?;
+        let recorded = store.record_session(&session)?;
+        Ok(AudienceRecordResult { session: recorded })
+    }
+
+    fn audience_metrics(&self, args: &AudienceMetricsArgs) -> Result<AudienceMetricsResult> {
+        let hours = args.hours.max(1);
+        let store = self.audience_store(true)?;
+        let end = Utc::now();
+        let start = end - Duration::hours(hours);
+        let report = store.metrics(start, end)?;
+        Ok(AudienceMetricsResult { report })
+    }
+
+    fn audience_heatmap(&self, args: &AudienceHeatmapArgs) -> Result<AudienceHeatmapResult> {
+        let store = self.audience_store(true)?;
+        let end = Utc::now();
+        let start = end - Duration::hours(24);
+        let report = store.metrics(start, end)?;
+        let output = args
+            .output
+            .clone()
+            .unwrap_or_else(|| self.monetization_reports_dir().join("audience_heatmap.png"));
+        let generated = store.generate_heatmap(&report, &output)?;
+        Ok(AudienceHeatmapResult { output: generated })
+    }
+
+    fn audience_report(&self, args: &AudienceReportArgs) -> Result<AudienceReportResultView> {
+        let hours = args.hours.max(1);
+        let store = self.audience_store(true)?;
+        let end = Utc::now();
+        let start = end - Duration::hours(hours);
+        let report = store.metrics(start, end)?;
+        let output = args
+            .output
+            .clone()
+            .unwrap_or_else(|| self.monetization_reports_dir().join("audience_report.json"));
+        let path = store.export_report(&report, &output)?;
+        Ok(AudienceReportResultView { path, report })
+    }
+
+    fn run_adaptive(&self) -> Result<AdaptiveReportView> {
+        let plan_store = self.plan_store(false)?;
+        let economy = self.economy_store(true)?;
+        let audience = self.audience_store(true)?;
+        let programmer = AdaptiveProgrammer::new(plan_store, economy, audience);
+        let report = programmer.run_once(Utc::now())?;
+        Ok(AdaptiveReportView { report })
+    }
+
+    fn spots_list(&self) -> Result<SpotListResult> {
+        let manager = MicroSpotManager::new(self.economy_store(false)?);
+        let contracts = manager.list()?;
+        Ok(SpotListResult { contracts })
+    }
+
+    fn spots_load(&self, args: &SpotLoadArgs) -> Result<SpotActionResult> {
+        let manager = MicroSpotManager::new(self.economy_store(false)?);
+        let contract = manager.register_from_file(&args.path)?;
+        Ok(SpotActionResult {
+            message: format!("Contrato {} carregado", contract.id),
+        })
+    }
+
+    fn spots_toggle(&self, args: &SpotToggleArgs, active: bool) -> Result<SpotActionResult> {
+        let manager = MicroSpotManager::new(self.economy_store(false)?);
+        manager.set_active(&args.id, active)?;
+        Ok(SpotActionResult {
+            message: format!(
+                "Contrato {} {}",
+                args.id,
+                if active { "ativado" } else { "desativado" }
+            ),
+        })
+    }
+
+    fn spots_inject(&self) -> Result<SpotInjectionResult> {
+        let manager = MicroSpotManager::new(self.economy_store(false)?);
+        let queue = self.queue_store(false)?;
+        let injections = manager.inject_due(&queue, Utc::now())?;
+        Ok(SpotInjectionResult { injections })
+    }
+
+    fn generate_dashboard(&self, args: &DashboardArgs) -> Result<DashboardResultView> {
+        let economy = self.economy_store(true)?;
+        let audience = self.audience_store(true)?;
+        let plans = self.plan_store(false)?;
+        let dashboard = MonetizationDashboard::new(&economy, &audience, &plans);
+        let output_dir = args
+            .output
+            .clone()
+            .unwrap_or_else(|| self.monetization_reports_dir());
+        let artifacts = dashboard.generate(&output_dir, Utc::now())?;
+        Ok(DashboardResultView { artifacts })
     }
 
     fn health_dashboard(&self, args: &HealthDashboardArgs) -> Result<AckMessage> {
@@ -1784,9 +2315,142 @@ impl DisplayFallback for QaReportResult {
     }
 }
 
+impl DisplayFallback for LedgerRecordResult {
+    fn display(&self) -> String {
+        format!(
+            "Evento {} registrado: €{:.2} — contexto {}",
+            self.event.event_type.as_str(),
+            self.event.value_eur,
+            self.event.context
+        )
+    }
+}
+
+impl DisplayFallback for LedgerSummaryResult {
+    fn display(&self) -> String {
+        format!(
+            "Financeiro {} → {} | receita {:.2} | custos {:.2} | resultado {:+.2}",
+            self.summary.start,
+            self.summary.end,
+            self.summary.revenue_total(),
+            self.summary.cost_total(),
+            self.summary.net_revenue
+        )
+    }
+}
+
+impl DisplayFallback for LedgerExportResult {
+    fn display(&self) -> String {
+        format!(
+            "Ledger exportado: {}\nManifesto: {}\nChecksum: {}",
+            self.export.csv_path.display(),
+            self.export.manifest_path.display(),
+            self.export.checksum
+        )
+    }
+}
+
+impl DisplayFallback for AudienceRecordResult {
+    fn display(&self) -> String {
+        format!(
+            "Sessão {} registrada — região {} — duração {:.1} min",
+            self.session.session_id,
+            self.session.region,
+            self.session.duration_seconds as f64 / 60.0
+        )
+    }
+}
+
+impl DisplayFallback for AudienceMetricsResult {
+    fn display(&self) -> String {
+        let metrics = &self.report.metrics;
+        format!(
+            "Sessões: {} | Retenção 5min: {:.0}% | Retenção 30min: {:.0}% | Duração média: {:.1} min",
+            metrics.total_sessions,
+            metrics.retention_5min * 100.0,
+            metrics.retention_30min * 100.0,
+            metrics.avg_duration_minutes
+        )
+    }
+}
+
+impl DisplayFallback for AudienceHeatmapResult {
+    fn display(&self) -> String {
+        format!("Heatmap gerado em {}", self.output.display())
+    }
+}
+
+impl DisplayFallback for AudienceReportResultView {
+    fn display(&self) -> String {
+        format!(
+            "Relatório salvo em {} ({} sessões)",
+            self.path.display(),
+            self.report.metrics.total_sessions
+        )
+    }
+}
+
+impl DisplayFallback for AdaptiveReportView {
+    fn display(&self) -> String {
+        format!(
+            "Atualizações aplicadas: {} | Receita líquida: {:+.2}",
+            self.report.updates.len(),
+            self.report.economy.net_revenue
+        )
+    }
+}
+
+impl DisplayFallback for SpotListResult {
+    fn display(&self) -> String {
+        if self.contracts.is_empty() {
+            "Nenhum microspot cadastrado".into()
+        } else {
+            self.contracts
+                .iter()
+                .map(|contract| {
+                    format!(
+                        "- {} ({}): €{:.2}, duração {}s, ativo={}",
+                        contract.id,
+                        contract.sponsor,
+                        contract.value_eur,
+                        contract.duration_s,
+                        contract.active
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+}
+
+impl DisplayFallback for SpotActionResult {
+    fn display(&self) -> String {
+        self.message.clone()
+    }
+}
+
+impl DisplayFallback for SpotInjectionResult {
+    fn display(&self) -> String {
+        format!("Microspots injetados: {}", self.injections.len())
+    }
+}
+
+impl DisplayFallback for DashboardResultView {
+    fn display(&self) -> String {
+        format!(
+            "Dashboard: {}\nFinance: {}\nTrends: {}\nHeatmap: {}",
+            self.artifacts.html_path.display(),
+            self.artifacts.finance_path.display(),
+            self.artifacts.trends_path.display(),
+            self.artifacts.heatmap_path.display()
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Duration, Utc};
     use rusqlite::params;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -1815,6 +2479,9 @@ mod tests {
         let plans_db = data_dir.join("plans.sqlite");
         let queue_db = data_dir.join("queue.sqlite");
         let metrics_db = data_dir.join("metrics.sqlite");
+        let economy_db = data_dir.join("economy.sqlite");
+        let viewers_db = data_dir.join("viewers.sqlite");
+        let reports_dir = root.join("reports");
 
         let conn = Connection::open(&plans_db).unwrap();
         conn.execute_batch(&fs::read_to_string("../sql/plans.sql").unwrap())
@@ -1860,6 +2527,56 @@ mod tests {
             )
             .unwrap();
 
+        let conn_economy = Connection::open(&economy_db).unwrap();
+        conn_economy
+            .execute_batch(&fs::read_to_string("../sql/economy.sql").unwrap())
+            .unwrap();
+        conn_economy
+            .execute(
+                "INSERT INTO economy_events (
+                    timestamp, event_type, value_eur, source, context, proof, notes
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    Utc::now().naive_utc(),
+                    "view",
+                    1.25f64,
+                    "viewer",
+                    "plan-1",
+                    "deadbeef",
+                    "sample"
+                ],
+            )
+            .unwrap();
+
+        let conn_viewers = Connection::open(&viewers_db).unwrap();
+        conn_viewers
+            .execute_batch(&fs::read_to_string("../sql/viewers.sql").unwrap())
+            .unwrap();
+        let join_time = Utc::now() - Duration::minutes(30);
+        let leave_time = join_time + Duration::minutes(20);
+        conn_viewers
+            .execute(
+                "INSERT INTO viewer_sessions (
+                    session_id, viewer_id, join_time, leave_time, duration_seconds,
+                    region, device, bandwidth_mbps, engagement_score, notes
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    "session-1",
+                    "viewer-1",
+                    join_time.naive_utc(),
+                    leave_time.naive_utc(),
+                    (leave_time - join_time).num_seconds(),
+                    "EU",
+                    "desktop",
+                    25.0f64,
+                    0.85f64,
+                    "seed"
+                ],
+            )
+            .unwrap();
+
+        fs::create_dir_all(&reports_dir).unwrap();
+
         let scripts_dir = root.join("scripts/system");
         fs::create_dir_all(&scripts_dir).unwrap();
         fs::copy(
@@ -1878,6 +2595,9 @@ mod tests {
             plans_db: Some(plans_db.clone()),
             queue_db: Some(queue_db.clone()),
             metrics_db: Some(metrics_db.clone()),
+            economy_db: Some(economy_db.clone()),
+            viewers_db: Some(viewers_db.clone()),
+            reports_dir: Some(reports_dir.clone()),
             fill_script: Some(scripts_dir.join("fill_buffer.sh")),
             token: None,
             format: OutputFormat::Json,

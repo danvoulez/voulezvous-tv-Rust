@@ -12,6 +12,8 @@ pub use error::{BrowserError, BrowserResult};
 pub use human::{HumanMotionController, HumanMotionPlan, MotionEvent, MotionPhase};
 pub use metadata::{ContentMetadata, MetadataExtractor, NormalizedTag};
 pub use metrics::BrowserMetrics;
-pub use pbd::{BrowserCapture, BrowserCaptureKind, PlayBeforeDownload, PlaybackValidation};
+pub use pbd::{
+    BrowserCapture, BrowserCaptureKind, PbdOutcome, PlayBeforeDownload, PlaybackValidation,
+};
 pub use profile::{BrowserProfile, ProfileManager};
 pub use qa::{BrowserQaRunner, QaScenario, QaScriptResult, SmokeTestResult};

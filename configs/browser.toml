@@ -116,3 +116,11 @@ cooldown_seconds = 10
 [observability]
 failure_log = "logs/curator_failures.log"
 metrics_db = "data/metrics.sqlite"
+
+[discovery]
+search_engine = "google"
+search_delay_ms = [2000, 5000]
+scroll_iterations = 3
+max_results_per_search = 20
+candidate_delay_ms = [8000, 15000]
+filter_domains = ["youtube.com", "vimeo.com", "dailymotion.com"]

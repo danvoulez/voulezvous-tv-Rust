@@ -727,6 +727,30 @@ filter_domains = ["youtube.com", "vimeo.com", "dailymotion.com"]
 - Geração de completions (`vvtvctl completions bash|zsh`) recomendada para operadores e agentes CI.
 - Rodar `scripts/optimize_databases.sh /vvtv/data` semanalmente para manter índices e estatísticas (`PRAGMA optimize`, `VACUUM`, `ANALYZE`).
 
+### Resiliência antibot (Implementada)
+
+- `vvtv-core/src/browser/fingerprint.rs` injeta ruído Canvas/WebGL/Audio antes de cada navegação.
+- `browser/retry.rs` + `ip_rotator.rs` categorizam erros, aplicam backoff e registram rotações de proxy.
+- `configs/browser.toml` expõe chaves `[fingerprint]`, `[proxy]`, `[retry]` para tunning por ambiente.
+
+### QA & Observabilidade (Implementado)
+
+- `vvtv-core/src/monitor.rs` grava métricas (`MetricsStore`) e gera dashboards HTML (`DashboardGenerator`).
+- `vvtvctl qa smoke-test|report` executa roteiros headless/headed; dados armazenados em `metrics.sqlite`.
+- `docs/qa/nightly-smoke.md` descreve checklist noturno, coleta de evidências e mitigação de falhas.
+
+### Otimizações de performance (Implementadas)
+
+- `vvtv-core/src/processor/mod.rs` ativa VideoToolbox automaticamente em Apple Silicon (`VVTV_FORCE_APPLE_SILICON`).
+- `vvtv-core/src/sqlite.rs` e `sql/*.sql` inicializam WAL + PRAGMAs (`cache_size`, `mmap_size`, `busy_timeout`).
+- `scripts/optimize_databases.sh` automatiza `wal_checkpoint`, `PRAGMA optimize`, `VACUUM`, `ANALYZE`.
+- `vvtvctl completions <shell>` gera autocompletar para operadores/CI.
+
+### Documentação operacional (Atualizada)
+
+- README, Tasklist e AGENTS refletem explicitamente as entregas D7–D11.
+- `CHANGELOG.md` e este Dossiê registram Discovery Loop, antibot, QA e performance.
+
 * * *
 
 4) Simulação Humana (Biomecânica)

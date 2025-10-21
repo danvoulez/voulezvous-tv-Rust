@@ -982,6 +982,10 @@ impl AppContext {
             failures_last_hour: Some(item.failures_last_hour),
             stream_bitrate_mbps: Some(item.stream_bitrate_mbps),
             vmaf_live: Some(item.vmaf_live),
+            audio_peak_db: Some(item.audio_peak_db),
+            freeze_events: Some(item.freeze_events),
+            black_frame_ratio: Some(item.black_frame_ratio),
+            signature_deviation: Some(item.signature_deviation),
         }))
     }
 
@@ -997,6 +1001,10 @@ impl AppContext {
             latency_s: 0.0,
             stream_bitrate_mbps: 0.0,
             vmaf_live: 0.0,
+            audio_peak_db: 0.0,
+            freeze_events: 0,
+            black_frame_ratio: 0.0,
+            signature_deviation: 0.0,
         };
         store.record(&record)?;
         Ok(())
@@ -1310,6 +1318,21 @@ impl DisplayFallback for StatusReport {
             if let Some(vmaf) = metrics.vmaf_live {
                 lines.push(format!("  - VMAF live: {:.1}", vmaf));
             }
+            if let Some(audio_peak) = metrics.audio_peak_db {
+                lines.push(format!("  - Audio peak: {:.1} dBFS", audio_peak));
+            }
+            if let Some(freeze) = metrics.freeze_events {
+                lines.push(format!("  - Freeze events: {freeze}"));
+            }
+            if let Some(black_ratio) = metrics.black_frame_ratio {
+                lines.push(format!(
+                    "  - Black frame ratio: {:.2}%",
+                    black_ratio * 100.0
+                ));
+            }
+            if let Some(signature) = metrics.signature_deviation {
+                lines.push(format!("  - Signature Δ: {:.2}", signature));
+            }
         } else {
             lines.push("Métricas: indisponíveis".to_string());
         }
@@ -1336,6 +1359,10 @@ pub struct MetricsSnapshot {
     pub failures_last_hour: Option<i64>,
     pub stream_bitrate_mbps: Option<f64>,
     pub vmaf_live: Option<f64>,
+    pub audio_peak_db: Option<f64>,
+    pub freeze_events: Option<i64>,
+    pub black_frame_ratio: Option<f64>,
+    pub signature_deviation: Option<f64>,
 }
 
 impl DisplayFallback for PlanList {
@@ -1812,11 +1839,26 @@ mod tests {
         conn_metrics
             .execute_batch(&fs::read_to_string("../sql/metrics.sql").unwrap())
             .unwrap();
-        conn_metrics.execute(
-            "INSERT INTO metrics(buffer_duration_h, queue_length, played_last_hour, failures_last_hour, avg_cpu_load, avg_temp_c, latency_s, stream_bitrate_mbps, vmaf_live) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![4.0, 3, 2, 0, 55.0, 48.5, 6.2, 2.8, 92.0],
-        )
-        .unwrap();
+        conn_metrics
+            .execute(
+                "INSERT INTO metrics(
+                buffer_duration_h,
+                queue_length,
+                played_last_hour,
+                failures_last_hour,
+                avg_cpu_load,
+                avg_temp_c,
+                latency_s,
+                stream_bitrate_mbps,
+                vmaf_live,
+                audio_peak_db,
+                freeze_events,
+                black_frame_ratio,
+                signature_deviation
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![4.0, 3, 2, 0, 55.0, 48.5, 6.2, 2.8, 92.0, -1.2, 0, 0.02, 0.18],
+            )
+            .unwrap();
 
         let scripts_dir = root.join("scripts/system");
         fs::create_dir_all(&scripts_dir).unwrap();

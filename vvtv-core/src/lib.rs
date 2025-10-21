@@ -17,6 +17,7 @@ pub mod error;
 pub mod monitor;
 pub mod plan;
 pub mod processor;
+pub mod quality;
 pub mod queue;
 mod sqlite;
 
@@ -57,7 +58,10 @@ pub use distribution::{
     DistributionCycleReport, DistributionError, DistributionManager,
 };
 pub use error::{ConfigError, Result};
-pub use monitor::{DashboardGenerator, MetricRecord, MetricSnapshot, MetricsStore, MonitorError};
+pub use monitor::{
+    DashboardGenerator, LiveQcSample, LiveQualityCollector, MetricRecord, MetricSnapshot,
+    MetricsStore, MonitorError, QcReportGenerator, VisualReviewPanel,
+};
 pub use plan::{
     Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanError, PlanImportRecord,
     PlanMetrics, PlanResult, PlanSelectionDecision, PlanStatus, Planner, PlannerConfig,
@@ -66,6 +70,10 @@ pub use plan::{
 };
 pub use processor::{
     Processor, ProcessorError, ProcessorReport, ProcessorResult, StagingPaths, MASTER_PLAYLIST_NAME,
+};
+pub use quality::{
+    QualityAction, QualityActionKind, QualityAnalyzer, QualityReport, QualityResult,
+    QualityThresholds, SignatureProfile,
 };
 pub use queue::{
     PlayoutQueueStore, PlayoutQueueStoreBuilder, QueueEntry, QueueError, QueueFilter, QueueItem,

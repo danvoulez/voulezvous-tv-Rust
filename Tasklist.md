@@ -208,30 +208,30 @@
 ---
 
 ## Epic G — Quality Control & Visual Consistency
-- ⬜️ **PR G1 — Pipeline de pré-QC (ffprobe, thresholds)**
-  - ⬜️ Automatizar `ffprobe` → `qc_pre.json`, validar resolução ≥720p, FPS, bitrate, keyframes.
-  - ⬜️ Reprocessar automaticamente se fora de faixa (transcode fallback).
-  - ⬜️ Registrar resultados e anexar a `manifest.json`.
-- ⬜️ **PR G2 — Mid-QC perceptual (SSIM, VMAF, blackdetect)**
-  - ⬜️ Integrar `libvmaf` e `ssim` com referência neutra.
-  - ⬜️ Rodar `blackdetect`, `astats` para ruído/picos de áudio.
-  - ⬜️ Aplicar correções (compressão adicional, equalização) quando thresholds violados.
-  - ⬜️ Marcar flag `qc_warning` e ações automáticas.
-- ⬜️ **PR G3 — Perfil estético VoulezVous**
-  - ⬜️ Extrair paleta cromática (`palettegen`, `color-thief`) e temperatura.
-  - ⬜️ Aplicar filtros (`eq=contrast=1.05:saturation=1.1`) para alinhar com signature profile.
-  - ⬜️ Registrar `signature_deviation` e ajustar `curation_score` quando necessário.
-  - ⬜️ Manter `signature_profile.json` e permitir ajustes calibrados.
-- ⬜️ **PR G4 — Monitoramento live-QC**
-  - ⬜️ Capturar frame do stream público a cada 5 min → `/monitor/captures/`.
-  - ⬜️ Medir `stream_bitrate`, `vmaf_live`, `audio_peak`, `latency` via `ffprobe`/`curl`.
-  - ⬜️ Alimentar dashboard com telemetria live.
-  - ⬜️ Alerts automáticos (bitrate <1 Mbps, VMAF <80, freeze >2s).
-- ⬜️ **PR G5 — Relatórios QC e revisão humana**
-  - ⬜️ Gerar `qc_report_<date>.json` diário com totals, médias, desvio estético.
-  - ⬜️ Implementar painel de revisão visual (4 amostras + 6 perguntas) para operador/IA.
-  - ⬜️ Integrar feedback qualitativo no `curation_score`.
-  - ⬜️ Exportar relatórios para vault (`/vvtv/reports/`).
+- ✅ **PR G1 — Pipeline de pré-QC (ffprobe, thresholds)**
+  - ✅ Automatizar `ffprobe` → `qc_pre.json`, validar resolução ≥720p, FPS, bitrate, keyframes.
+  - ✅ Reprocessar automaticamente se fora de faixa (transcode fallback).
+  - ✅ Registrar resultados e anexar a `manifest.json`.
+- ✅ **PR G2 — Mid-QC perceptual (SSIM, VMAF, blackdetect)**
+  - ✅ Integrar `libvmaf` e `ssim` com referência neutra.
+  - ✅ Rodar `blackdetect`, `astats` para ruído/picos de áudio.
+  - ✅ Aplicar correções (compressão adicional, equalização) quando thresholds violados.
+  - ✅ Marcar flag `qc_warning` e ações automáticas.
+- ✅ **PR G3 — Perfil estético VoulezVous**
+  - ✅ Extrair paleta cromática (`palettegen`, `color-thief`) e temperatura.
+  - ✅ Aplicar filtros (`eq=contrast=1.05:saturation=1.1`) para alinhar com signature profile.
+  - ✅ Registrar `signature_deviation` e ajustar `curation_score` quando necessário.
+  - ✅ Manter `signature_profile.json` e permitir ajustes calibrados.
+- ✅ **PR G4 — Monitoramento live-QC**
+  - ✅ Capturar frame do stream público a cada 5 min → `/monitor/captures/`.
+  - ✅ Medir `stream_bitrate`, `vmaf_live`, `audio_peak`, `latency` via `ffprobe`/`curl`.
+  - ✅ Alimentar dashboard com telemetria live.
+  - ✅ Alerts automáticos (bitrate <1 Mbps, VMAF <80, freeze >2s).
+- ✅ **PR G5 — Relatórios QC e revisão humana**
+  - ✅ Gerar `qc_report_<date>.json` diário com totals, médias, desvio estético.
+  - ✅ Implementar painel de revisão visual (4 amostras + 6 perguntas) para operador/IA.
+  - ✅ Integrar feedback qualitativo no `curation_score`.
+  - ✅ Exportar relatórios para vault (`/vvtv/reports/`).
 
 ---
 

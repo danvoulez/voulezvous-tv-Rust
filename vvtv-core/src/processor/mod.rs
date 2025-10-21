@@ -25,6 +25,10 @@ use url::Url;
 use crate::browser::{BrowserAutomation, BrowserCaptureKind, PbdOutcome, PlayBeforeDownload};
 use crate::config::{ProcessorConfig, VvtvConfig};
 use crate::plan::{Plan, PlanStatus, SqlitePlanStore};
+use crate::quality::{
+    PreQcReport, QualityAction, QualityActionKind, QualityAnalyzer, QualityReport,
+    QualityThresholds, SignatureFilters, SignatureProfile,
+};
 use crate::queue::{PlayoutQueueStore, QueueItem};
 
 pub use error::{ProcessorError, ProcessorResult};
@@ -50,6 +54,8 @@ pub struct Processor {
     log_path: PathBuf,
     retry_policy: RetryPolicy,
     retry_sleep_cap: Duration,
+    quality_thresholds: QualityThresholds,
+    signature_profile: Arc<SignatureProfile>,
 }
 
 impl Processor {
@@ -59,6 +65,30 @@ impl Processor {
         processor_config: ProcessorConfig,
         vvtv_config: VvtvConfig,
     ) -> ProcessorResult<Self> {
+        let quality_thresholds = QualityThresholds::from_configs(&processor_config, &vvtv_config);
+        let signature_profile = vvtv_config
+            .quality
+            .signature
+            .as_ref()
+            .map(|signature_cfg| {
+                let resolved = vvtv_config.resolve_path(&signature_cfg.profile_path);
+                match SignatureProfile::load(&resolved) {
+                    Ok(mut profile) => {
+                        profile.max_deviation = signature_cfg.max_deviation;
+                        profile.palette_size = signature_cfg.palette_size;
+                        Arc::new(profile)
+                    }
+                    Err(err) => {
+                        warn!(
+                            path = %resolved.display(),
+                            error = %err,
+                            "using default signature profile"
+                        );
+                        Arc::new(SignatureProfile::default_profile())
+                    }
+                }
+            })
+            .unwrap_or_else(|| Arc::new(SignatureProfile::default_profile()));
         let processor_config = Arc::new(processor_config);
         let vvtv_config = Arc::new(vvtv_config);
         let http_client = Client::builder()
@@ -83,6 +113,8 @@ impl Processor {
             log_path,
             retry_policy,
             retry_sleep_cap: Duration::from_secs(60),
+            quality_thresholds,
+            signature_profile,
         })
     }
 
@@ -94,6 +126,13 @@ impl Processor {
     pub fn with_retry_sleep_cap(mut self, cap: Duration) -> Self {
         self.retry_sleep_cap = cap;
         self
+    }
+
+    fn quality_analyzer(&self) -> QualityAnalyzer {
+        QualityAnalyzer::new(
+            self.quality_thresholds.clone(),
+            self.signature_profile.clone(),
+        )
     }
 
     pub async fn capture_and_process(
@@ -136,15 +175,41 @@ impl Processor {
         let mastering = self
             .prepare_master(plan, &revalidation, &downloaded)
             .await?;
+        let (mastering, pre_qc_report, qc_actions) = self
+            .ensure_master_quality(plan, &downloaded, mastering)
+            .await?;
         let packaging = self
             .package_media(plan, &revalidation, &downloaded, &mastering)
             .await?;
-        let _qc = self
-            .run_quality_control(plan, &revalidation, &mastering, &packaging)
+        let qc = self
+            .run_quality_control(
+                plan,
+                &revalidation,
+                &mastering,
+                &packaging,
+                pre_qc_report,
+                qc_actions,
+            )
             .await?;
 
+        let adjusted_score = self.apply_quality_feedback(plan, &qc.report)?;
+        if qc.report.qc_warning {
+            if let Err(err) = self.plan_store.record_attempt(
+                &plan.plan_id,
+                Some(plan.status.clone()),
+                Some(PlanStatus::Edited),
+                format!("qc warnings: {}", qc.report.warnings.join(" | ")),
+            ) {
+                warn!(
+                    plan_id = %plan.plan_id,
+                    error = %err,
+                    "failed to record qc warning in plan attempts"
+                );
+            }
+        }
+
         self.update_plan_record(plan, &revalidation).await?;
-        self.enqueue_plan(plan, &packaging).await?;
+        self.enqueue_plan(plan, &packaging, adjusted_score).await?;
         self.cleanup_staging(&staging).await?;
 
         let report = ProcessorReport::new(
@@ -495,27 +560,93 @@ impl Processor {
         })
     }
 
+    async fn ensure_master_quality(
+        &self,
+        plan: &Plan,
+        downloaded: &DownloadedMedia,
+        mut mastering: MasteringOutcome,
+    ) -> ProcessorResult<(MasteringOutcome, PreQcReport, Vec<QualityAction>)> {
+        let analyzer = self.quality_analyzer();
+        let mut actions = Vec::new();
+        let mut report = analyzer
+            .analyze_pre(&mastering.normalized_path)
+            .await
+            .map_err(ProcessorError::from)?;
+        if !report.within_thresholds
+            && matches!(mastering.strategy, MasteringStrategy::Remux)
+            && self.processor_config.remux.fallback_transcode
+        {
+            warn!(
+                plan_id = %plan.plan_id,
+                width = report.width,
+                height = report.height,
+                "pre-qc thresholds failed, triggering transcode fallback"
+            );
+            self.transcode_media(&mastering.master_path, downloaded)
+                .await?;
+            if self.processor_config.loudnorm.enabled {
+                let normalized = mastering
+                    .master_path
+                    .parent()
+                    .map(|dir| dir.join("master_normalized.mp4"))
+                    .unwrap_or_else(|| {
+                        mastering
+                            .master_path
+                            .with_file_name("master_normalized.mp4")
+                    });
+                self.write_loudnorm_stub(&mastering.master_path, &normalized)
+                    .await?;
+                mastering.normalized_path = normalized;
+            } else {
+                mastering.normalized_path = mastering.master_path.clone();
+            }
+            mastering.strategy = MasteringStrategy::Transcode;
+            mastering.descriptor.container = "mp4".into();
+            mastering.descriptor.video_codec = "h264".into();
+            report = analyzer
+                .analyze_pre(&mastering.normalized_path)
+                .await
+                .map_err(ProcessorError::from)?;
+            actions.push(QualityAction {
+                kind: QualityActionKind::TranscodeFallback,
+                description: "fallback para transcode após reprovação de pré-QC".into(),
+            });
+        }
+        mastering.descriptor.width = report.width;
+        mastering.descriptor.height = report.height;
+        mastering.descriptor.duration = Some(report.duration_seconds);
+        Ok((mastering, report, actions))
+    }
+
     async fn run_quality_control(
         &self,
         plan: &Plan,
         revalidation: &RevalidationOutcome,
         mastering: &MasteringOutcome,
         packaging: &PackagingArtifacts,
+        pre_qc: PreQcReport,
+        actions: Vec<QualityAction>,
     ) -> ProcessorResult<QcArtifacts> {
         let ready_dir = &packaging.ready_dir;
         let qc_report_path = ready_dir.join("qc_pre.json");
         let checksums_path = ready_dir.join("checksums.json");
         let manifest_path = ready_dir.join("manifest.json");
 
-        let qc_payload = serde_json::json!({
-            "plan_id": plan.plan_id,
-            "video_width": revalidation.validation.video_width,
-            "video_height": revalidation.validation.video_height,
-            "duration_seconds": packaging.duration,
-            "strategy": mastering.strategy,
-            "hd_missing": revalidation.hd_missing,
-        });
-        fs::write(&qc_report_path, serde_json::to_vec_pretty(&qc_payload)?)
+        let analyzer = self.quality_analyzer();
+        let (frame_path, placeholder_frame) = analyzer
+            .capture_reference_frame(&mastering.normalized_path, ready_dir)
+            .await
+            .map_err(ProcessorError::from)?;
+        let mid_report = analyzer
+            .analyze_mid(&mastering.normalized_path, Some(&frame_path))
+            .await
+            .map_err(ProcessorError::from)?;
+        let signature_report = analyzer
+            .analyze_signature(&frame_path, placeholder_frame)
+            .map_err(ProcessorError::from)?;
+        let quality_report = analyzer.compose_report(pre_qc, mid_report, signature_report, actions);
+
+        fs::write(&qc_report_path, serde_json::to_vec_pretty(&quality_report)?)
             .await
             .map_err(|source| ProcessorError::Io {
                 path: qc_report_path.clone(),
@@ -554,6 +685,7 @@ impl Processor {
                 .filter_map(|path| path.file_name().map(|n| n.to_string_lossy().to_string()))
                 .collect(),
             created_at: Utc::now(),
+            quality: ManifestQuality::from_report(&quality_report, &frame_path, ready_dir),
         };
         fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)
             .await
@@ -566,7 +698,33 @@ impl Processor {
             qc_report: qc_report_path,
             checksums: checksums_path,
             manifest: manifest_path,
+            signature_frame: frame_path,
+            report: quality_report,
         })
+    }
+
+    fn apply_quality_feedback(&self, plan: &Plan, report: &QualityReport) -> ProcessorResult<f64> {
+        let mut score = plan.curation_score;
+        let signature_threshold = self.quality_thresholds.signature_max_deviation;
+        if report.signature.signature_deviation > signature_threshold {
+            score *= 0.92;
+        } else if report.signature.signature_deviation < signature_threshold * 0.4 {
+            score *= 1.05;
+        }
+        if report.mid.black_ratio > self.quality_thresholds.black_frame_ratio {
+            score *= 0.9;
+        }
+        if report.qc_warning {
+            score *= 0.95;
+        }
+        if score.is_nan() {
+            score = plan.curation_score;
+        }
+        score = score.clamp(0.0, 1.0);
+        if (score - plan.curation_score).abs() > f64::EPSILON {
+            self.plan_store.update_score(&plan.plan_id, score)?;
+        }
+        Ok(score)
     }
 
     async fn update_plan_record(
@@ -593,13 +751,14 @@ impl Processor {
         &self,
         plan: &Plan,
         packaging: &PackagingArtifacts,
+        score: f64,
     ) -> ProcessorResult<()> {
         let asset_path = packaging.chosen_playlist.to_string_lossy().to_string();
         let item = QueueItem {
             plan_id: plan.plan_id.clone(),
             asset_path,
             duration_s: packaging.duration.map(|d| d.round() as i64),
-            curation_score: Some(plan.curation_score),
+            curation_score: Some(score),
             priority: 0,
             node_origin: Some(self.vvtv_config.system.node_name.clone()),
             content_kind: Some(plan.kind.clone()),
@@ -1205,4 +1364,90 @@ struct Manifest {
     duration: Option<f64>,
     playlists: Vec<String>,
     created_at: chrono::DateTime<Utc>,
+    quality: ManifestQuality,
+}
+
+#[derive(Debug, Serialize)]
+struct ManifestQuality {
+    pre: ManifestPre,
+    mid: ManifestMid,
+    signature: ManifestSignature,
+    warnings: Vec<String>,
+    actions: Vec<QualityAction>,
+    qc_warning: bool,
+}
+
+impl ManifestQuality {
+    fn from_report(report: &QualityReport, frame_path: &Path, ready_dir: &Path) -> Self {
+        let signature_frame = frame_path
+            .strip_prefix(ready_dir)
+            .ok()
+            .and_then(|path| path.to_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| frame_path.to_string_lossy().to_string());
+        Self {
+            pre: ManifestPre {
+                width: report.pre.width,
+                height: report.pre.height,
+                fps: report.pre.fps,
+                bitrate_kbps: report.pre.bitrate_kbps,
+                duration_seconds: report.pre.duration_seconds,
+                keyframe_interval: report.pre.keyframe_interval,
+                keyframe_estimated: report.pre.keyframe_estimated,
+            },
+            mid: ManifestMid {
+                vmaf_score: report.mid.vmaf_score,
+                ssim_score: report.mid.ssim_score,
+                black_ratio: report.mid.black_ratio,
+                audio_peak_db: report.mid.audio_peak_db,
+                noise_floor_db: report.mid.noise_floor_db,
+                freeze_score: report.mid.freeze_score,
+            },
+            signature: ManifestSignature {
+                palette: report.signature.palette.clone(),
+                average_color: report.signature.average_color.clone(),
+                average_temperature: report.signature.average_temperature,
+                average_saturation: report.signature.average_saturation,
+                signature_deviation: report.signature.signature_deviation,
+                filters: report.signature.filters_applied.clone(),
+                placeholder_frame: report.signature.placeholder_frame,
+                capture: signature_frame,
+            },
+            warnings: report.warnings.clone(),
+            actions: report.actions.clone(),
+            qc_warning: report.qc_warning,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ManifestPre {
+    width: u32,
+    height: u32,
+    fps: f64,
+    bitrate_kbps: u32,
+    duration_seconds: f64,
+    keyframe_interval: f64,
+    keyframe_estimated: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ManifestMid {
+    vmaf_score: f64,
+    ssim_score: f64,
+    black_ratio: f64,
+    audio_peak_db: f64,
+    noise_floor_db: f64,
+    freeze_score: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct ManifestSignature {
+    palette: Vec<String>,
+    average_color: String,
+    average_temperature: f32,
+    average_saturation: f32,
+    signature_deviation: f64,
+    filters: SignatureFilters,
+    placeholder_frame: bool,
+    capture: String,
 }

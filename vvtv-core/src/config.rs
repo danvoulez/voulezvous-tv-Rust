@@ -89,6 +89,22 @@ pub struct QualitySection {
     pub fallback_resolution: String,
     pub hls_segment_duration: u32,
     pub hls_playlist_length_minutes: u32,
+    #[serde(default)]
+    pub signature: Option<SignatureSection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SignatureSection {
+    pub profile_path: String,
+    pub max_deviation: f64,
+    #[serde(default = "SignatureSection::default_palette_size")]
+    pub palette_size: u32,
+}
+
+impl SignatureSection {
+    fn default_palette_size() -> u32 {
+        5
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -435,6 +451,12 @@ pub struct QcSection {
     pub duration_tolerance_percent: u32,
     pub min_duration_video_s: u32,
     pub min_duration_music_s: u32,
+    pub min_height: u32,
+    pub min_fps: f64,
+    pub min_bitrate_kbps: u32,
+    pub max_keyframe_interval_s: f64,
+    pub black_pixel_ratio_threshold: f64,
+    pub audio_peak_ceiling_db: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

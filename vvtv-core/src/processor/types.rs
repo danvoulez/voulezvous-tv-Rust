@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::browser::{BrowserCapture, ContentMetadata, PlaybackValidation};
+use crate::quality::QualityReport;
 
 use super::error::ProcessorError;
 
@@ -144,6 +145,8 @@ pub struct QcArtifacts {
     pub qc_report: PathBuf,
     pub checksums: PathBuf,
     pub manifest: PathBuf,
+    pub signature_frame: PathBuf,
+    pub report: QualityReport,
 }
 
 #[derive(Debug, Clone, Serialize)]

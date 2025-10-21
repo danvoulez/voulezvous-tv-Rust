@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS playout_queue (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME,
     node_origin TEXT,
+    play_started_at DATETIME,
+    play_finished_at DATETIME,
+    failure_reason TEXT,
+    content_kind TEXT,
     FOREIGN KEY(plan_id) REFERENCES plans(plan_id)
 );
 

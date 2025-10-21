@@ -144,7 +144,9 @@ fn pbd_outcome(url: String, kind: BrowserCaptureKind, height: u32) -> PbdOutcome
 fn read_queue_items(queue_path: &Path) -> Vec<QueueItem> {
     let db = Connection::open(queue_path).unwrap();
     let mut stmt = db
-        .prepare("SELECT plan_id, asset_path, duration_s, curation_score, priority, node_origin FROM playout_queue")
+        .prepare(
+            "SELECT plan_id, asset_path, duration_s, curation_score, priority, node_origin, content_kind FROM playout_queue",
+        )
         .unwrap();
     let rows = stmt
         .query_map([], |row| {
@@ -155,6 +157,7 @@ fn read_queue_items(queue_path: &Path) -> Vec<QueueItem> {
                 curation_score: row.get(3)?,
                 priority: row.get(4)?,
                 node_origin: row.get(5)?,
+                content_kind: row.get(6)?,
             })
         })
         .unwrap();

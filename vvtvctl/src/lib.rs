@@ -5,15 +5,17 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use thiserror::Error;
 use vvtv_core::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
-    ConfigBundle, Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord,
-    PlanMetrics, PlanStatus, SqlitePlanStore,
+    ConfigBundle, DashboardGenerator, MetricRecord, MetricsStore, MonitorError, Plan,
+    PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanImportRecord, PlanMetrics, PlanStatus,
+    PlayoutQueueStore, QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics,
+    QueueStatus, SqlitePlanStore,
 };
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -30,6 +32,10 @@ pub enum AppError {
     Serialize(#[from] serde_json::Error),
     #[error("plan error: {0}")]
     Plan(#[from] vvtv_core::PlanError),
+    #[error("queue error: {0}")]
+    Queue(#[from] QueueError),
+    #[error("monitor error: {0}")]
+    Monitor(#[from] MonitorError),
     #[error("authentication failed")]
     Authentication,
     #[error("required resource missing: {0}")]
@@ -179,6 +185,16 @@ pub struct PlanImportArgs {
 pub enum QueueCommands {
     /// Lista itens da fila de playout
     Show(QueueShowArgs),
+    /// Exibe resumo da fila
+    Summary,
+    /// Ajusta prioridade de um item
+    Promote(QueuePromoteArgs),
+    /// Remove item da fila
+    Remove(QueueRemoveArgs),
+    /// Limpa itens reproduzidos mais antigos
+    Cleanup(QueueCleanupArgs),
+    /// Exporta backup compactado da fila
+    Backup(QueueBackupArgs),
 }
 
 #[derive(Args, Debug)]
@@ -189,6 +205,34 @@ pub struct QueueShowArgs {
     /// Limite de registros
     #[arg(long, default_value_t = 10)]
     pub limit: usize,
+}
+
+#[derive(Args, Debug)]
+pub struct QueuePromoteArgs {
+    /// ID do item na fila
+    pub id: i64,
+    /// Nova prioridade (0 = normal, 1 = alta)
+    #[arg(long, default_value_t = 1)]
+    pub priority: i64,
+}
+
+#[derive(Args, Debug)]
+pub struct QueueRemoveArgs {
+    /// ID do item na fila
+    pub id: i64,
+}
+
+#[derive(Args, Debug)]
+pub struct QueueCleanupArgs {
+    /// Limite em horas para remoção de itens `played`
+    #[arg(long, default_value_t = 72)]
+    pub older_than_hours: i64,
+}
+
+#[derive(Args, Debug)]
+pub struct QueueBackupArgs {
+    /// Caminho do arquivo `.sql.gz`
+    pub output: PathBuf,
 }
 
 #[derive(Subcommand, Debug)]
@@ -207,10 +251,22 @@ pub struct BufferFillArgs {
     pub dry_run: bool,
 }
 
+#[derive(Args, Debug)]
+pub struct HealthDashboardArgs {
+    /// Caminho de saída do dashboard
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+    /// Número de pontos exibidos
+    #[arg(long, default_value_t = 48)]
+    pub points: usize,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum HealthCommands {
     /// Executa checagens básicas
     Check,
+    /// Gera dashboard HTML com histórico recente
+    Dashboard(HealthDashboardArgs),
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -240,26 +296,54 @@ pub fn run(cli: Cli) -> Result<()> {
                 render(&result, cli.format)?;
             }
         },
-        Commands::Queue(QueueCommands::Show(args)) => {
-            let queue = context.queue_show(args)?;
-            render(&queue, cli.format)?;
-        }
+        Commands::Queue(command) => match command {
+            QueueCommands::Show(args) => {
+                let queue = context.queue_show(args)?;
+                render(&queue, cli.format)?;
+            }
+            QueueCommands::Summary => {
+                let summary = context.queue_summary()?;
+                render(&summary, cli.format)?;
+            }
+            QueueCommands::Promote(args) => {
+                let result = context.queue_promote(args)?;
+                render(&result, cli.format)?;
+            }
+            QueueCommands::Remove(args) => {
+                let result = context.queue_remove(args)?;
+                render(&result, cli.format)?;
+            }
+            QueueCommands::Cleanup(args) => {
+                let result = context.queue_cleanup(args)?;
+                render(&result, cli.format)?;
+            }
+            QueueCommands::Backup(args) => {
+                let result = context.queue_backup(args)?;
+                render(&result, cli.format)?;
+            }
+        },
         Commands::Buffer(BufferCommands::Fill(args)) => {
             let result = context.buffer_fill(args)?;
             render(&result, cli.format)?;
         }
-        Commands::Health(HealthCommands::Check) => {
-            let report = context.health_check()?;
-            render(&report, cli.format)?;
-            if report
-                .iter()
-                .any(|entry| matches!(entry.status, CheckStatus::Error))
-            {
-                return Err(AppError::MissingResource(
-                    "Uma ou mais verificações falharam".to_string(),
-                ));
+        Commands::Health(command) => match command {
+            HealthCommands::Check => {
+                let report = context.health_check()?;
+                render(&report, cli.format)?;
+                if report
+                    .iter()
+                    .any(|entry| matches!(entry.status, CheckStatus::Error))
+                {
+                    return Err(AppError::MissingResource(
+                        "Uma ou mais verificações falharam".to_string(),
+                    ));
+                }
             }
-        }
+            HealthCommands::Dashboard(args) => {
+                let result = context.health_dashboard(args)?;
+                render(&result, cli.format)?;
+            }
+        },
     }
 
     Ok(())
@@ -399,7 +483,11 @@ impl AppContext {
             .as_ref()
             .map(|metrics| metrics.by_status.clone())
             .unwrap_or_default();
-        let queue_counts = self.queue_counts().unwrap_or_default();
+        let queue_counts = self.queue_summary_map().unwrap_or_default();
+        let queue_metrics = self.queue_metrics().ok();
+        if let Some(metrics) = &queue_metrics {
+            let _ = self.record_metrics(metrics);
+        }
         let metrics = self.metrics_snapshot()?;
 
         Ok(StatusReport {
@@ -496,32 +584,6 @@ impl AppContext {
             imported,
             total: records.len(),
         })
-    }
-
-    fn queue_show(&self, args: &QueueShowArgs) -> Result<QueueList> {
-        let conn = self.open_database(&self.queue_db)?;
-        let mut stmt = conn.prepare(
-            "SELECT id, plan_id, status, duration_s, priority, created_at, updated_at \
-             FROM playout_queue \
-             WHERE (?1 IS NULL OR status = ?1) \
-             ORDER BY priority DESC, created_at ASC \
-             LIMIT ?2",
-        )?;
-        let rows = stmt
-            .query_map((args.status.as_ref(), args.limit as i64), |row| {
-                Ok(QueueEntry {
-                    id: row.get(0)?,
-                    plan_id: row.get(1)?,
-                    status: row.get(2)?,
-                    duration_s: row.get::<_, Option<i64>>(3)?,
-                    priority: row.get::<_, Option<i64>>(4)?,
-                    created_at: row.get::<_, Option<String>>(5)?,
-                    updated_at: row.get::<_, Option<String>>(6)?,
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-
-        Ok(QueueList { rows })
     }
 
     fn buffer_fill(&self, args: &BufferFillArgs) -> Result<BufferFillResult> {
@@ -634,26 +696,116 @@ impl AppContext {
         Ok(conn)
     }
 
-    fn queue_counts(&self) -> Option<HashMap<String, i64>> {
-        let conn = self.open_database(&self.queue_db).ok()?;
-        let mut stmt = conn
-            .prepare("SELECT status, COUNT(*) FROM playout_queue GROUP BY status")
-            .ok()?;
-        let mut map = HashMap::new();
-        for row in stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .ok()?
-        {
-            if let Ok((status, count)) = row {
-                map.insert(status, count);
-            }
-        }
-        Some(map)
-    }
-
     fn plan_metrics(&self) -> Option<PlanMetrics> {
         let store = self.plan_store(true).ok()?;
         store.compute_metrics().ok()
+    }
+
+    fn queue_store(&self, read_only: bool) -> Result<PlayoutQueueStore> {
+        if read_only && !self.queue_db.exists() {
+            return Err(AppError::MissingResource(format!(
+                "Banco de dados ausente: {}",
+                self.queue_db.display()
+            )));
+        }
+        let builder = PlayoutQueueStore::builder()
+            .path(&self.queue_db)
+            .read_only(read_only)
+            .create_if_missing(!read_only);
+        let store = builder.build()?;
+        if !read_only {
+            store.initialize()?;
+        }
+        Ok(store)
+    }
+
+    fn queue_metrics(&self) -> Result<QueueMetrics> {
+        let store = self.queue_store(true)?;
+        Ok(store.metrics()?)
+    }
+
+    fn queue_summary_map(&self) -> Result<HashMap<String, i64>> {
+        let store = self.queue_store(true)?;
+        let summary = store.summary()?;
+        let map = summary
+            .counts
+            .into_iter()
+            .map(|(status, count)| (status.to_string(), count))
+            .collect();
+        Ok(map)
+    }
+
+    fn queue_show(&self, args: &QueueShowArgs) -> Result<QueueList> {
+        let store = self.queue_store(true)?;
+        let status = match &args.status {
+            Some(value) => Some(parse_queue_status(value)?),
+            None => None,
+        };
+        let mut filter = QueueFilter::default();
+        filter.status = status;
+        filter.limit = Some(args.limit);
+        let entries = store.list(&filter)?;
+        let rows = entries.into_iter().map(QueueDisplayEntry::from).collect();
+        Ok(QueueList { rows })
+    }
+
+    fn queue_summary(&self) -> Result<QueueSummaryOutput> {
+        let store = self.queue_store(true)?;
+        let summary = store.summary()?;
+        let metrics = store.metrics()?;
+        let counts = summary
+            .counts
+            .into_iter()
+            .map(|(status, count)| (status.to_string(), count))
+            .collect();
+        Ok(QueueSummaryOutput {
+            buffer_hours: summary.buffer_duration_hours,
+            counts,
+            played_last_hour: metrics.played_last_hour,
+            failures_last_hour: metrics.failures_last_hour,
+        })
+    }
+
+    fn queue_promote(&self, args: &QueuePromoteArgs) -> Result<AckMessage> {
+        let store = self.queue_store(false)?;
+        store.mark_priority(args.id, args.priority)?;
+        Ok(AckMessage {
+            message: format!(
+                "Prioridade do item {} ajustada para {}",
+                args.id, args.priority
+            ),
+        })
+    }
+
+    fn queue_remove(&self, args: &QueueRemoveArgs) -> Result<AckMessage> {
+        let store = self.queue_store(false)?;
+        store.remove(args.id)?;
+        Ok(AckMessage {
+            message: format!("Item {} removido da fila", args.id),
+        })
+    }
+
+    fn queue_cleanup(&self, args: &QueueCleanupArgs) -> Result<AckMessage> {
+        let store = self.queue_store(false)?;
+        let hours = args.older_than_hours.max(1);
+        let removed = store.cleanup_played(Duration::hours(hours))?;
+        Ok(AckMessage {
+            message: format!("Removidos {removed} itens reproduzidos há mais de {hours}h"),
+        })
+    }
+
+    fn queue_backup(&self, args: &QueueBackupArgs) -> Result<AckMessage> {
+        let store = self.queue_store(true)?;
+        store.export_backup(&args.output)?;
+        Ok(AckMessage {
+            message: format!("Backup salvo em {}", args.output.display()),
+        })
+    }
+
+    fn metrics_store(&self) -> Result<MetricsStore> {
+        let store = MetricsStore::new(&self.metrics_db)?;
+        store.initialize()?;
+        Ok(store)
     }
 
     fn plan_store(&self, read_only: bool) -> Result<SqlitePlanStore> {
@@ -671,27 +823,63 @@ impl AppContext {
     }
 
     fn metrics_snapshot(&self) -> Result<Option<MetricsSnapshot>> {
-        if !self.metrics_db.exists() {
-            return Ok(None);
-        }
-        let conn = self.open_database(&self.metrics_db)?;
-        let mut stmt = conn.prepare(
-            "SELECT ts, buffer_duration_h, queue_length, avg_cpu_load, avg_temp_c, latency_s \
-             FROM metrics ORDER BY ts DESC LIMIT 1",
-        )?;
-        let snapshot = stmt
-            .query_row([], |row| {
-                Ok(MetricsSnapshot {
-                    timestamp: row.get::<_, Option<String>>(0)?,
-                    buffer_duration_h: row.get::<_, Option<f64>>(1)?,
-                    queue_length: row.get::<_, Option<i64>>(2)?,
-                    avg_cpu_load: row.get::<_, Option<f64>>(3)?,
-                    avg_temp_c: row.get::<_, Option<f64>>(4)?,
-                    latency_s: row.get::<_, Option<f64>>(5)?,
-                })
-            })
-            .optional()?;
-        Ok(snapshot)
+        let store = self.metrics_store()?;
+        let snapshot = store.latest()?;
+        Ok(snapshot.map(|item| MetricsSnapshot {
+            timestamp: Some(item.timestamp.to_rfc3339()),
+            buffer_duration_h: Some(item.buffer_duration_h),
+            queue_length: Some(item.queue_length),
+            avg_cpu_load: Some(item.avg_cpu_load),
+            avg_temp_c: Some(item.avg_temp_c),
+            latency_s: Some(item.latency_s),
+            played_last_hour: Some(item.played_last_hour),
+            failures_last_hour: Some(item.failures_last_hour),
+            stream_bitrate_mbps: Some(item.stream_bitrate_mbps),
+            vmaf_live: Some(item.vmaf_live),
+        }))
+    }
+
+    fn record_metrics(&self, queue_metrics: &QueueMetrics) -> Result<()> {
+        let store = self.metrics_store()?;
+        let record = MetricRecord {
+            buffer_duration_h: queue_metrics.buffer_duration_hours,
+            queue_length: queue_metrics.queue_length,
+            played_last_hour: queue_metrics.played_last_hour,
+            failures_last_hour: queue_metrics.failures_last_hour,
+            avg_cpu_load: self.read_loadavg().unwrap_or_default(),
+            avg_temp_c: self.read_temperature().unwrap_or_default(),
+            latency_s: 0.0,
+            stream_bitrate_mbps: 0.0,
+            vmaf_live: 0.0,
+        };
+        store.record(&record)?;
+        Ok(())
+    }
+
+    fn health_dashboard(&self, args: &HealthDashboardArgs) -> Result<AckMessage> {
+        let store = self.metrics_store()?;
+        let output = args
+            .output
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("/vvtv/monitor/dashboard.html"));
+        let generator = DashboardGenerator::new(store, &output);
+        generator.generate(args.points)?;
+        Ok(AckMessage {
+            message: format!("Dashboard atualizado em {}", output.display()),
+        })
+    }
+
+    fn read_loadavg(&self) -> Option<f64> {
+        let content = fs::read_to_string("/proc/loadavg").ok()?;
+        let first = content.split_whitespace().next()?;
+        first.parse::<f64>().ok().map(|value| value * 100.0)
+    }
+
+    fn read_temperature(&self) -> Option<f64> {
+        let path = Path::new("/sys/class/thermal/thermal_zone0/temp");
+        let content = fs::read_to_string(path).ok()?;
+        let raw = content.trim().parse::<f64>().ok()?;
+        Some(raw / 1000.0)
     }
 }
 
@@ -747,6 +935,18 @@ impl DisplayFallback for StatusReport {
             if let Some(lat) = metrics.latency_s {
                 lines.push(format!("  - Latency: {:.2} s", lat));
             }
+            if let Some(played) = metrics.played_last_hour {
+                lines.push(format!("  - Played (1h): {played}"));
+            }
+            if let Some(failed) = metrics.failures_last_hour {
+                lines.push(format!("  - Failures (1h): {failed}"));
+            }
+            if let Some(bitrate) = metrics.stream_bitrate_mbps {
+                lines.push(format!("  - Bitrate: {:.2} Mbps", bitrate));
+            }
+            if let Some(vmaf) = metrics.vmaf_live {
+                lines.push(format!("  - VMAF live: {:.1}", vmaf));
+            }
         } else {
             lines.push("Métricas: indisponíveis".to_string());
         }
@@ -769,6 +969,10 @@ pub struct MetricsSnapshot {
     pub avg_cpu_load: Option<f64>,
     pub avg_temp_c: Option<f64>,
     pub latency_s: Option<f64>,
+    pub played_last_hour: Option<i64>,
+    pub failures_last_hour: Option<i64>,
+    pub stream_bitrate_mbps: Option<f64>,
+    pub vmaf_live: Option<f64>,
 }
 
 impl DisplayFallback for PlanList {
@@ -902,6 +1106,11 @@ fn parse_plan_import(content: &str, overwrite: bool) -> Result<Vec<PlanImportRec
     ))
 }
 
+fn parse_queue_status(value: &str) -> Result<QueueStatus> {
+    QueueStatus::from_str(value)
+        .map_err(|_| AppError::InvalidArgument(format!("status inválido: {value}")))
+}
+
 impl DisplayFallback for QueueList {
     fn display(&self) -> String {
         if self.rows.is_empty() {
@@ -913,19 +1122,52 @@ impl DisplayFallback for QueueList {
                 .duration_s
                 .map(|v| format!("{v}s"))
                 .unwrap_or_else(|| "-".to_string());
-            let priority = entry
-                .priority
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "-".to_string());
+            let mut extras = Vec::new();
+            if let Some(score) = entry.curation_score {
+                extras.push(format!("score={:.2}", score));
+            }
+            if let Some(kind) = &entry.content_kind {
+                extras.push(format!("kind={kind}"));
+            }
+            if let Some(origin) = &entry.node_origin {
+                extras.push(format!("origin={origin}"));
+            }
+            let extra = if extras.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", extras.join(", "))
+            };
             lines.push(format!(
-                "#{id} plan={plan} status={status} priority={priority} dur={duration}",
+                "#{id} plan={plan} status={status} priority={priority} dur={duration}{extra}",
                 id = entry.id,
                 plan = entry.plan_id,
                 status = entry.status,
-                priority = priority,
+                priority = entry.priority,
+                extra = extra,
             ));
         }
         lines.join("\n")
+    }
+}
+
+impl DisplayFallback for QueueSummaryOutput {
+    fn display(&self) -> String {
+        let mut lines = vec![format!("Buffer disponível: {:.2} h", self.buffer_hours)];
+        lines.push("Contagens por status:".to_string());
+        for (status, count) in self.counts.iter() {
+            lines.push(format!("  - {status}: {count}"));
+        }
+        lines.push(format!(
+            "Última hora: reproduzidos={}, falhas={}",
+            self.played_last_hour, self.failures_last_hour
+        ));
+        lines.join("\n")
+    }
+}
+
+impl DisplayFallback for AckMessage {
+    fn display(&self) -> String {
+        self.message.clone()
     }
 }
 
@@ -992,18 +1234,51 @@ pub struct PlanImportResult {
 
 #[derive(Debug, Serialize)]
 pub struct QueueList {
-    pub rows: Vec<QueueEntry>,
+    pub rows: Vec<QueueDisplayEntry>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct QueueEntry {
+pub struct QueueDisplayEntry {
     pub id: i64,
     pub plan_id: String,
     pub status: String,
     pub duration_s: Option<i64>,
-    pub priority: Option<i64>,
+    pub priority: i64,
+    pub curation_score: Option<f64>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
+    pub node_origin: Option<String>,
+    pub content_kind: Option<String>,
+}
+
+impl From<QueueStoreEntry> for QueueDisplayEntry {
+    fn from(entry: QueueStoreEntry) -> Self {
+        Self {
+            id: entry.id,
+            plan_id: entry.plan_id,
+            status: entry.status.to_string(),
+            duration_s: entry.duration_s,
+            priority: entry.priority,
+            curation_score: entry.curation_score,
+            created_at: format_datetime(entry.created_at),
+            updated_at: format_datetime(entry.updated_at),
+            node_origin: entry.node_origin,
+            content_kind: entry.content_kind,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct QueueSummaryOutput {
+    pub buffer_hours: f64,
+    pub counts: HashMap<String, i64>,
+    pub played_last_hour: i64,
+    pub failures_last_hour: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AckMessage {
+    pub message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1131,8 +1406,8 @@ mod tests {
             .execute_batch(&fs::read_to_string("../sql/metrics.sql").unwrap())
             .unwrap();
         conn_metrics.execute(
-            "INSERT INTO metrics(buffer_duration_h, queue_length, avg_cpu_load, avg_temp_c, latency_s) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![4.0, 3, 55.0, 48.5, 6.2],
+            "INSERT INTO metrics(buffer_duration_h, queue_length, played_last_hour, failures_last_hour, avg_cpu_load, avg_temp_c, latency_s, stream_bitrate_mbps, vmaf_live) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![4.0, 3, 2, 0, 55.0, 48.5, 6.2, 2.8, 92.0],
         )
         .unwrap();
 

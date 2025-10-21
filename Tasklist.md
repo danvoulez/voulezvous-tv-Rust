@@ -159,31 +159,31 @@
 ---
 
 ## Epic F — Queue, Playout & Watchdogs
-- [ ] **PR F1 — Implementar gestão da fila `playout_queue`**
-  - [ ] Serviços Rust para leitura/atualização `queued` → `playing` → `played`/`failed`.
-  - [ ] Regras FIFO com curation bump (score >0.85, inserir músicas a cada 10 itens).
-  - [ ] Limpeza automática de `played` >72h e backups `.sql.gz` diários.
-  - [ ] CLI `vvtvctl queue` para inspeção, prioridade manual, remoção.
-- [ ] **PR F2 — Broadcaster (FFmpeg → RTMP → HLS)**
-  - [ ] Orquestrar FFmpeg `-re` ingest a partir do asset (HLS 720p preferido).
-  - [ ] Atualizar status de fila em tempo real e medir duração executada.
-  - [ ] Implementar crossfade/fades (vídeo 400ms, áudio acrossfade sin) entre itens.
-  - [ ] Integrar com emergency loop e buffer calculations.
-- [ ] **PR F3 — Watchdog de playout**
-  - [ ] Daemon (tokio) que verifica stream ativo (ffprobe), buffer >= mínimo, ffmpeg processos.
-  - [ ] Ações automáticas: restart encoder, reiniciar nginx, injetar emergency loop, pausar downloads.
-  - [ ] Limite de tentativas (3 restarts em 5 min) + escalonamento (alerta humano).
-  - [ ] Logs estruturados (`watchdog.log`) e métricas (`failures_last_hour`).
-- [ ] **PR F4 — Failover local e sincronização**
-  - [ ] Implementar processo standby (`failover` stream) e comutação automática (<3s) em caso de freeze.
-  - [ ] Sincronizar `/vvtv/storage/ready/` para nó backup (rsync horário, checksums).
-  - [ ] Implementar gravação de 4h de live em `/vvtv/storage/archive/`.
-  - [ ] Scripts de verificação (`sync_status.sh`).
-- [ ] **PR F5 — Métricas e dashboard local**
-  - [ ] Persistir métricas (`buffer_duration_h`, `queue_length`, `latency`, `stream_bitrate`).
-  - [ ] Gerar dashboard HTML com gráfico de buffer, uptime, alertas recentes.
-  - [ ] Exportar snapshots JSON para `monitor/dashboard.html`.
-  - [ ] Testes de geração de relatórios (diário/horário).
+- [x] **PR F1 — Implementar gestão da fila `playout_queue`**
+  - [x] Serviços Rust para leitura/atualização `queued` → `playing` → `played`/`failed`.
+  - [x] Regras FIFO com curation bump (score >0.85, inserir músicas a cada 10 itens).
+  - [x] Limpeza automática de `played` >72h e backups `.sql.gz` diários.
+  - [x] CLI `vvtvctl queue` para inspeção, prioridade manual, remoção.
+- [x] **PR F2 — Broadcaster (FFmpeg → RTMP → HLS)**
+  - [x] Orquestrar FFmpeg `-re` ingest a partir do asset (HLS 720p preferido).
+  - [x] Atualizar status de fila em tempo real e medir duração executada.
+  - [x] Implementar crossfade/fades (vídeo 400ms, áudio acrossfade sin) entre itens.
+  - [x] Integrar com emergency loop e buffer calculations.
+- [x] **PR F3 — Watchdog de playout**
+  - [x] Daemon (tokio) que verifica stream ativo (ffprobe), buffer >= mínimo, ffmpeg processos.
+  - [x] Ações automáticas: restart encoder, reiniciar nginx, injetar emergency loop, pausar downloads.
+  - [x] Limite de tentativas (3 restarts em 5 min) + escalonamento (alerta humano).
+  - [x] Logs estruturados (`watchdog.log`) e métricas (`failures_last_hour`).
+- [x] **PR F4 — Failover local e sincronização**
+  - [x] Implementar processo standby (`failover` stream) e comutação automática (<3s) em caso de freeze.
+  - [x] Sincronizar `/vvtv/storage/ready/` para nó backup (rsync horário, checksums).
+  - [x] Implementar gravação de 4h de live em `/vvtv/storage/archive/`.
+  - [x] Scripts de verificação (`sync_status.sh`).
+- [x] **PR F5 — Métricas e dashboard local**
+  - [x] Persistir métricas (`buffer_duration_h`, `queue_length`, `latency`, `stream_bitrate`).
+  - [x] Gerar dashboard HTML com gráfico de buffer, uptime, alertas recentes.
+  - [x] Exportar snapshots JSON para `monitor/dashboard.html`.
+  - [x] Testes de geração de relatórios (diário/horário).
 
 ---
 

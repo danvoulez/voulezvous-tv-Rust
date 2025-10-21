@@ -1,10 +1,18 @@
+pub mod broadcaster;
 pub mod browser;
 pub mod config;
 pub mod error;
+pub mod monitor;
 pub mod plan;
 pub mod processor;
 pub mod queue;
 
+pub use broadcaster::{
+    failover::{FailoverError, FailoverManager},
+    watchdog::{Watchdog, WatchdogAction, WatchdogError, WatchdogReport},
+    Broadcaster, BroadcasterError, BroadcasterEvent, BroadcasterPaths, CommandExecutor,
+    SystemCommandExecutor,
+};
 pub use browser::{
     BrowserAutomation, BrowserCapture, BrowserCaptureKind, BrowserError, BrowserEvent,
     BrowserLauncher, BrowserMetrics, BrowserProfile, BrowserQaRunner, BrowserResult,
@@ -15,6 +23,7 @@ pub use config::{
     BroadcasterConfig, BrowserConfig, ConfigBundle, ProcessorConfig, VvtvConfig,
 };
 pub use error::{ConfigError, Result};
+pub use monitor::{DashboardGenerator, MetricRecord, MetricSnapshot, MetricsStore, MonitorError};
 pub use plan::{
     Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry, PlanError, PlanImportRecord,
     PlanMetrics, PlanResult, PlanSelectionDecision, PlanStatus, Planner, PlannerConfig,
@@ -24,4 +33,7 @@ pub use plan::{
 pub use processor::{
     Processor, ProcessorError, ProcessorReport, ProcessorResult, StagingPaths, MASTER_PLAYLIST_NAME,
 };
-pub use queue::{PlayoutQueueStore, PlayoutQueueStoreBuilder, QueueError, QueueItem, QueueResult};
+pub use queue::{
+    PlayoutQueueStore, PlayoutQueueStoreBuilder, QueueEntry, QueueError, QueueFilter, QueueItem,
+    QueueMetrics, QueueResult, QueueSelectionPolicy, QueueStatus, QueueSummary,
+};

@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
-use crate::error::{ConfigError, Result};
+use crate::{
+    error::{ConfigError, Result},
+    incident::IncidentCommunicationsConfig,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -15,6 +18,8 @@ pub struct VvtvConfig {
     pub quality: QualitySection,
     pub security: SecuritySection,
     pub monitoring: MonitoringSection,
+    #[serde(default)]
+    pub communications: IncidentCommunicationsConfig,
     pub distribution: DistributionSection,
     pub economy: EconomySection,
 }

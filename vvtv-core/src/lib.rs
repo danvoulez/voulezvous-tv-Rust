@@ -14,6 +14,7 @@ pub mod browser;
 pub mod config;
 pub mod distribution;
 pub mod error;
+pub mod incident;
 pub mod monetization;
 pub mod monitor;
 pub mod plan;
@@ -59,6 +60,12 @@ pub use distribution::{
     DistributionCycleReport, DistributionError, DistributionManager,
 };
 pub use error::{ConfigError, Result};
+pub use incident::{
+    DispatchAction, DispatchStatus, IncidentChannel, IncidentCommunicationsConfig,
+    IncidentDispatch, IncidentError, IncidentHistoryRecord, IncidentHistoryWriter,
+    IncidentNotification, IncidentNotifier, IncidentReport, IncidentSeverity,
+    IncidentTimelineEntry, SeverityRouting,
+};
 pub use monetization::{
     AdaptiveError, AdaptiveProgrammer, AdaptiveReport, AdaptiveResult, AdaptiveUpdate,
     AudienceError, AudienceMetrics, AudienceReport, AudienceResult, AudienceSnapshot,

@@ -91,6 +91,25 @@ capture_interval_minutes = 5
 alert_telegram_enabled = true
 alert_email_enabled = false
 
+[communications]
+incident_history_dir = "/vvtv/vault/incident_history"
+
+[communications.routing]
+critical = ["telegram", "email"]
+high = ["telegram"]
+medium = ["log"]
+low = ["log"]
+
+[communications.telegram]
+command = "telegram-send"
+args = ["--config", "/vvtv/vault/keys/telegram.conf"]
+
+[communications.email]
+command = "sendmail"
+sender = "VVTV Incident Bot <incident@voulezvous.tv>"
+recipients = ["ops@voulezvous.tv", "foundation@voulezvous.tv"]
+subject_prefix = "[VVTV]"
+
 [economy]
 monetization_enabled = true
 base_rate_per_minute = 0.001

@@ -333,11 +333,11 @@
   - ✅ Automatizar lembretes de revisão (cron) e checklist de ações (auditorias, testes de buffer, sandbox integrity, etc.).
   - ✅ Integrar com métricas/alertas (ex: buffer <2h → risco R5).
   - ✅ Documentar processo de revisão mensal/quarterly.
-- ⬜️ **PR K3 — Sistema de comunicação e escalonamento**
-  - ⬜️ Integrar Telegram/email para alertas por gravidade (crítico, alto, médio, baixo).
-  - ⬜️ Criar templates de postmortem (`VVTV POSTMORTEM — INCIDENT <ID>`).
-  - ⬜️ Automatizar geração de relatórios de incidente (resumo, causa-raiz, ações preventivas).
-  - ⬜️ Registrar histórico em vault (`incident_history/`).
+- ✅ **PR K3 — Sistema de comunicação e escalonamento**
+  - ✅ Integrar Telegram/email para alertas por gravidade (crítico, alto, médio, baixo).
+  - ✅ Criar templates de postmortem (`VVTV POSTMORTEM — INCIDENT <ID>`).
+  - ✅ Automatizar geração de relatórios de incidente (resumo, causa-raiz, ações preventivas).
+  - ✅ Registrar histórico em vault (`incident_history/`).
 
 ---
 

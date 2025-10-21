@@ -25,6 +25,36 @@ Use-os em conjunto com o [Apêndice B do Dossiê Industrial](../VVTV%20INDUSTRIA
 | --- | --- | --- |
 | `takedown.sh` | `takedown.sh --id PLAN_ID --reason "Solicitação legal"` | Remove um asset (tabela `plans` e `playout_queue`) e move artefatos para quarentena, preservando trilha de auditoria. |
 
+## Comunicação e Escalonamento
+
+- Utilize `vvtvctl incident report` para gerar o postmortem computável, arquivar no vault e disparar alertas por gravidade.
+- Severidade → canais automáticos:
+
+| Gravidade | Canais |
+| --- | --- |
+| Crítico | Telegram + Email + registro local |
+| Alto | Telegram + registro local |
+| Médio | Registro local (incluso no histórico) |
+| Baixo | Registro local |
+
+Exemplo:
+
+```bash
+vvtvctl incident report \
+  --id INC-2025-04 \
+  --title "Buffer abaixo de 1h" \
+  --severity critical \
+  --summary "Buffer caiu para 0, stream offline" \
+  --impact "24 min offline" \
+  --root-cause "CDN principal indisponível" \
+  --action "Ativar emergency loop" \
+  --prevention "Configurar alerta antecipado" \
+  --timeline 2025-04-12T21:11:00Z=Alarme emitido \
+  --timeline 2025-04-12T21:15:00Z=Emergency loop ativo
+```
+
+O comando gera Markdown/JSON em `vault/incident_history/` e envia notificações conforme a matriz acima (use `--dry-run` em ambientes de teste).
+
 ### Convenções Gerais
 
 - Todos os scripts aceitam `--dry-run` quando apropriado, evitando efeitos colaterais.

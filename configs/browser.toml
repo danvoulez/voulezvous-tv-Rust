@@ -92,3 +92,27 @@ timeout_seconds = 10
 # Whitelisted domains (license verified)
 whitelist = []
 blacklist = []
+
+[fingerprint]
+enable_canvas_noise = true
+enable_webgl_mask = true
+enable_audio_mask = true
+canvas_noise_range = [-3, 3]
+audio_noise = 0.0001
+webgl_vendor = "Intel Inc."
+webgl_renderer = "Intel Iris OpenGL Engine"
+
+[retry]
+max_attempts = 3
+schedule_minutes = [10, 45, 1440]
+jitter_seconds = 30
+
+[ip_rotation]
+enabled = true
+tailscale_binary = "tailscale"
+exit_nodes = ["fra.exit.ts.net", "nyc.exit.ts.net"]
+cooldown_seconds = 10
+
+[observability]
+failure_log = "logs/curator_failures.log"
+metrics_db = "data/metrics.sqlite"

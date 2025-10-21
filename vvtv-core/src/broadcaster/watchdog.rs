@@ -72,7 +72,7 @@ impl Watchdog {
         executor: Option<Arc<dyn CommandExecutor>>,
         rtmp_url: String,
     ) -> Self {
-        let executor = executor.unwrap_or_else(|| Arc::new(SystemCommandExecutor::default()));
+        let executor = executor.unwrap_or_else(|| Arc::new(SystemCommandExecutor));
         Self {
             queue,
             config,

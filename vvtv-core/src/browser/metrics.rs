@@ -9,6 +9,8 @@ pub struct BrowserMetrics {
     pub playback_failures: u64,
     pub manifests_collected: u64,
     pub network_requests: u64,
+    pub proxy_rotations: u64,
+    pub bot_detections: u64,
 }
 
 impl BrowserMetrics {
@@ -37,5 +39,21 @@ impl BrowserMetrics {
 
     pub fn record_network_events(&mut self, count: u64) {
         self.network_requests = self.network_requests.saturating_add(count);
+    }
+
+    pub fn record_proxy_rotation(&mut self) {
+        self.proxy_rotations = self.proxy_rotations.saturating_add(1);
+    }
+
+    pub fn record_bot_detection(&mut self) {
+        self.bot_detections = self.bot_detections.saturating_add(1);
+    }
+
+    pub fn pbd_success_rate(&self) -> f64 {
+        if self.hd_attempts == 0 {
+            0.0
+        } else {
+            (self.hd_success as f64 / self.hd_attempts as f64) * 100.0
+        }
     }
 }

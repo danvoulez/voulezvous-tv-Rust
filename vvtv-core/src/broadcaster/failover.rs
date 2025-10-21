@@ -43,7 +43,7 @@ impl FailoverManager {
         archive_root: PathBuf,
         executor: Option<Arc<dyn CommandExecutor>>,
     ) -> Self {
-        let executor = executor.unwrap_or_else(|| Arc::new(SystemCommandExecutor::default()));
+        let executor = executor.unwrap_or_else(|| Arc::new(SystemCommandExecutor));
         Self {
             executor,
             rsync_path,

@@ -52,6 +52,8 @@ pub struct PathsSection {
     pub broadcast_dir: String,
     pub logs_dir: String,
     pub vault_dir: String,
+    #[serde(default)]
+    pub business_logic: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

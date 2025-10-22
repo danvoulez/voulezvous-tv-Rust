@@ -11,11 +11,14 @@
 
 pub mod broadcaster;
 pub mod browser;
+pub mod business_logic;
 pub mod compliance;
 pub mod config;
+pub mod curation;
 pub mod distribution;
 pub mod error;
 pub mod incident;
+pub mod llm;
 pub mod monetization;
 pub mod monitor;
 pub mod plan;
@@ -40,6 +43,12 @@ pub use browser::{
     SearchSessionFactory, SessionRecorder, SessionRecorderConfig, SmokeMode, SmokeTestOptions,
     SmokeTestResult,
 };
+pub use business_logic::{
+    Autopilot as BusinessAutopilot, BusinessLogic, BusinessLogicError, Exploration,
+    Knobs as BusinessKnobs, Kpis as BusinessKpis, Result as BusinessLogicResult,
+    Scheduling as BusinessScheduling, SeedStrategy, Selection as BusinessSelection,
+    SelectionMethod,
+};
 pub use compliance::{
     ComplianceError, ComplianceResult, ComplianceSuite, ComplianceSuiteConfig, ComplianceSummary,
     ConsentLogEntry, CsamHashEntry, CsamScanFinding, CsamScanReport, CsamScanner,
@@ -49,6 +58,10 @@ pub use compliance::{
 pub use config::{
     load_broadcaster_config, load_browser_config, load_processor_config, load_vvtv_config,
     BroadcasterConfig, BrowserConfig, ConfigBundle, ProcessorConfig, VvtvConfig,
+};
+pub use curation::{
+    CuratorDecision, CuratorEvaluation, CuratorSignal, CuratorVigilante, CuratorVigilanteConfig,
+    TokenBucket,
 };
 pub use distribution::{
     cdn::{
@@ -72,6 +85,10 @@ pub use incident::{
     IncidentDispatch, IncidentError, IncidentHistoryRecord, IncidentHistoryWriter,
     IncidentNotification, IncidentNotifier, IncidentReport, IncidentSeverity,
     IncidentTimelineEntry, SeverityRouting,
+};
+pub use llm::{
+    CircuitBreakerConfig, LlmAction, LlmHookKind, LlmHookOutcome, LlmInvocation,
+    LlmInvocationResult, LlmOrchestrator, LlmResultMode,
 };
 pub use monetization::{
     AdaptiveError, AdaptiveProgrammer, AdaptiveReport, AdaptiveResult, AdaptiveUpdate,

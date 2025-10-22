@@ -1560,6 +1560,12 @@ Este AGENTS.md é um guia de implementação, mas o **VVTV INDUSTRIAL DOSSIER.md
 - **D10 Performance**: fallback VideoToolbox, conexões SQLite em WAL e `scripts/optimize_databases.sh`.
 - **D11 Documentação**: README, Tasklist, AGENTS e Dossiê alinhados ao roadmap atualizado.
 
+### Epic P — Business Logic & Intelligent Curation (implementado)
+- **P1 Core Engine**: loader YAML (`business_logic::load_from_file`), seleção Gumbel-Top-k com seed robusto e CLI `vvtvctl business-logic`.
+- **P2 LLM Hooks**: `llm::LlmOrchestrator` com timeout + circuit breaker integrado ao Planner (racional contém `llm_action{...}`).
+- **P3 Curator Vigilante**: detectores estéticos + token bucket (`curation::CuratorVigilante`) gerando logs `logs/curator_vigilante/*.jsonl`.
+- 📚 Documentação: `docs/BUSINESS_LOGIC_README.md`, `docs/LLM_HOOKS.md`, `docs/CURATOR_VIGILANTE.md`, `BUSINESS_LOGIC_INTEGRATION.md`, `EPIC-P.md`.
+
 > Continue usando checklists locais (ex: abaixo) para fases restantes do projeto:
 
 ```markdown

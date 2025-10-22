@@ -1,8 +1,40 @@
+use std::sync::Arc;
+
 use vvtv_core::plan::planner::PlannerEvent;
 use vvtv_core::{
-    Plan, PlanImportRecord, Planner, PlannerConfig, RealizationOutcome, Realizer, RealizerConfig,
-    SqlitePlanStore,
+    BusinessLogic, Plan, PlanImportRecord, Planner, PlannerConfig, RealizationOutcome, Realizer,
+    RealizerConfig, SqlitePlanStore,
 };
+
+fn business_logic_fixture() -> Arc<BusinessLogic> {
+    let yaml = r#"
+policy_version: "test"
+env: "unit"
+knobs:
+  boost_bucket: "music"
+  music_mood_focus: ["focus"]
+  interstitials_ratio: 0.05
+  plan_selection_bias: 0.0
+scheduling:
+  slot_duration_minutes: 15
+  global_seed: 42
+selection:
+  method: gumbel_top_k
+  temperature: 0.85
+  top_k: 4
+  seed_strategy: slot_hash
+exploration:
+  epsilon: 0.1
+autopilot:
+  enabled: false
+kpis:
+  primary: []
+  secondary: []
+"#;
+    let mut logic: BusinessLogic = serde_yaml::from_str(yaml).unwrap();
+    logic.validate().unwrap();
+    Arc::new(logic)
+}
 
 fn setup_store() -> SqlitePlanStore {
     let dir = tempfile::tempdir().unwrap();
@@ -55,8 +87,12 @@ async fn test_planner_and_realizer_flow() {
         store.upsert_plan(&plan).unwrap();
     }
 
-    let planner = Planner::new(store.clone(), PlannerConfig::default());
-    let event = planner.run_once(chrono::Utc::now()).unwrap();
+    let planner = Planner::new(
+        store.clone(),
+        PlannerConfig::default(),
+        business_logic_fixture(),
+    );
+    let event = planner.run_once_async(chrono::Utc::now()).await.unwrap();
     match event {
         PlannerEvent::Selected(decisions) => {
             assert!(!decisions.is_empty());

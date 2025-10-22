@@ -1,0 +1,27 @@
+policy_version: "2025.10"
+env: "production"
+knobs:
+  boost_bucket: "music"
+  music_mood_focus:
+    - "focus"
+    - "midnight"
+  interstitials_ratio: 0.08
+  plan_selection_bias: 0.0
+scheduling:
+  slot_duration_minutes: 15
+  global_seed: 4242
+selection:
+  method: gumbel_top_k
+  temperature: 0.85
+  top_k: 12
+  seed_strategy: slot_hash
+exploration:
+  epsilon: 0.12
+autopilot:
+  enabled: false
+  max_daily_variation: 0.05
+kpis:
+  primary:
+    - "selection_entropy"
+  secondary:
+    - "curator_apply_budget_used_pct"

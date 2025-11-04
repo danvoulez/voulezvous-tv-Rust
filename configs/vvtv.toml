@@ -1,0 +1,173 @@
+# VVTV Main Configuration
+# Version: 1.0
+# Institution: VoulezVous Foundation
+
+[system]
+node_name = "vvtv-primary"
+node_role = "broadcast"
+node_id = "vvtv-node-001"
+environment = "production"
+
+[paths]
+base_dir = "/vvtv"
+data_dir = "/vvtv/data"
+cache_dir = "/vvtv/cache"
+storage_dir = "/vvtv/storage"
+broadcast_dir = "/vvtv/broadcast"
+logs_dir = "/vvtv/system/logs"
+vault_dir = "/vvtv/vault"
+business_logic = "/vvtv/business_logic/business_logic.yaml"
+
+[limits]
+# Buffer management
+buffer_target_hours = 6
+buffer_warning_hours = 3
+buffer_critical_hours = 1.5
+
+# Concurrency
+max_concurrent_downloads = 2
+max_concurrent_transcodes = 2
+max_browser_instances = 2
+
+# Resource limits
+cpu_limit_percent = 75
+memory_limit_gb = 12
+disk_warning_percent = 80
+disk_critical_percent = 90
+
+# Retention
+plans_retention_days = 30
+played_retention_hours = 72
+logs_retention_days = 14
+cache_retention_hours = 24
+
+[network]
+tailscale_domain = "voulezvous.ts.net"
+rtmp_port = 1935
+hls_port = 8080
+control_port = 9000
+
+# CDN
+cdn_primary = "cloudflare"
+cdn_backup = "backblaze"
+
+[quality]
+# Audio
+target_lufs = -14.0
+lufs_tolerance = 1.5
+audio_codec = "aac"
+audio_bitrate = "160k"
+
+# Video
+vmaf_threshold = 85
+ssim_threshold = 0.92
+target_resolution = "1080p"
+fallback_resolution = "720p"
+
+# HLS
+hls_segment_duration = 4
+hls_playlist_length_minutes = 48
+
+[quality.signature]
+profile_path = "/vvtv/system/signature_profile.json"
+max_deviation = 0.35
+palette_size = 5
+
+[security]
+sandbox_enabled = true
+fingerprint_randomization = true
+proxy_rotation_enabled = true
+csam_check_enabled = true
+drm_detection_abort = true
+
+# Firewall
+allow_rtmp_from = ["tailscale"]
+allow_hls_from = ["tailscale", "cdn"]
+allow_ssh_from = ["tailscale"]
+
+[monitoring]
+health_check_interval_seconds = 60
+metrics_collection_interval_seconds = 300
+capture_interval_minutes = 5
+alert_telegram_enabled = true
+alert_email_enabled = false
+
+[communications]
+incident_history_dir = "/vvtv/vault/incident_history"
+
+[communications.routing]
+critical = ["telegram", "email"]
+high = ["telegram"]
+medium = ["log"]
+low = ["log"]
+
+[communications.telegram]
+command = "telegram-send"
+args = ["--config", "/vvtv/vault/keys/telegram.conf"]
+
+[communications.email]
+command = "sendmail"
+sender = "VVTV Incident Bot <incident@voulezvous.tv>"
+recipients = ["ops@voulezvous.tv", "foundation@voulezvous.tv"]
+subject_prefix = "[VVTV]"
+
+[economy]
+monetization_enabled = true
+base_rate_per_minute = 0.001
+ledger_export_interval_hours = 24
+reconciliation_interval_days = 7
+
+[distribution.replication]
+rclone_path = "/usr/bin/rclone"
+remote = "railway:vv_origin"
+sync_paths = ["/vvtv/broadcast/hls", "/vvtv/storage/ready"]
+bandwidth_limit_mbps = 64
+log_path = "/vvtv/system/logs/origin_replication.log"
+failover_script = "/vvtv/system/promote_failover.sh"
+check_threshold_percent = 5.0
+
+[distribution.cdn_primary]
+provider = "cloudflare"
+api_base = "https://api.cloudflare.com/client/v4"
+zone_id = "example-zone-id"
+account_id = "example-account-id"
+api_token_path = "/vvtv/vault/keys/cloudflare_api_token"
+dns_record_id = "example-dns-record"
+dns_record_name = "voulezvous.tv"
+primary_hostname = "origin.voulezvous.ts.net"
+backup_hostname = "railway.voulezvous.ts.net"
+health_check_url = "https://voulezvous.tv/live.m3u8"
+manifest_ttl_seconds = 60
+segment_ttl_seconds = 3600
+metrics_log_path = "/vvtv/system/logs/cdn_metrics.jsonl"
+worker_script_path = "/vvtv/system/workers/cloudflare_rewrite.js"
+worker_service = "vv-edge"
+worker_environment = "production"
+
+[distribution.cdn_backup]
+provider = "backblaze"
+rclone_path = "/usr/bin/rclone"
+source_paths = ["/vvtv/broadcast/hls"]
+remote = "b2:vv_hls_backup"
+manifest_path = "/vvtv/broadcast/hls/manifest.json"
+ttl_days = 7
+switch_script = "/vvtv/system/switch_cdn.sh"
+log_path = "/vvtv/system/logs/cdn_backup.log"
+
+[distribution.edge]
+init_command = "/usr/local/bin/logline"
+init_args = ["--init-node", "--role=edge"]
+region = "eu-west"
+latency_targets = ["https://voulezvous.tv/live.m3u8", "https://backup.voulezvous.tv/live.m3u8"]
+latency_log_path = "/vvtv/system/logs/edge_latency.jsonl"
+heatmap_output_path = "/vvtv/system/metrics/latency_heatmap.json"
+buffer_seconds = 15
+reload_threshold_seconds = 20
+
+[distribution.security]
+tls_required = true
+certificate_path = "/vvtv/vault/keys/tls.pem"
+token_secret_path = "/vvtv/vault/keys/cdn_token.key"
+token_ttl_minutes = 5
+firewall_sources = ["tailscale", "cloudflare", "bunnycdn"]
+access_log_path = "/vvtv/system/logs/distribution_access.log"

@@ -1,0 +1,267 @@
+# VVTV AWS Production Configuration
+# Optimized for adult content streaming with local LLM
+
+[system]
+node_name = "vvtv-aws-primary"
+node_role = "broadcast"
+node_id = "vvtv-aws-001"
+environment = "aws_production"
+
+[paths]
+base_dir = "/vvtv"
+data_dir = "/vvtv/data"
+cache_dir = "/vvtv/cache"
+storage_dir = "/mnt/efs/storage"          # EFS mount for shared content
+broadcast_dir = "/vvtv/broadcast"
+logs_dir = "/vvtv/system/logs"
+vault_dir = "/vvtv/vault"
+business_logic = "/vvtv/system/business_logic.yaml"
+
+[limits]
+# AWS-optimized limits
+buffer_target_hours = 8                   # Higher buffer for reliability
+buffer_warning_hours = 4
+buffer_critical_hours = 2
+
+# Concurrency (optimized for c6i.2xlarge)
+max_concurrent_downloads = 4
+max_concurrent_transcodes = 3
+max_browser_instances = 2
+
+# Resource limits (AWS instance optimized)
+cpu_limit_percent = 80                    # Leave headroom for system
+memory_limit_gb = 14                      # 16GB instance, leave 2GB for OS
+disk_warning_percent = 75
+disk_critical_percent = 85
+
+# Retention (cost-optimized)
+plans_retention_days = 14                 # Shorter retention for cost
+played_retention_hours = 48
+logs_retention_days = 7
+cache_retention_hours = 12
+
+[network]
+# AWS internal networking
+rtmp_port = 1935
+hls_port = 8080
+control_port = 9000
+llm_endpoint = "http://10.0.1.100:11434"  # Local LLM node IP
+
+# CDN configuration
+cdn_primary = "bunnycdn"                  # Adult-friendly CDN
+cdn_backup = "cloudfront"                 # AWS native fallback
+
+[aws]
+# AWS-specific configuration
+region = "us-east-1"
+availability_zone = "us-east-1a"
+instance_id = "i-0123456789abcdef0"       # Will be populated at runtime
+
+# S3 configuration
+s3_bucket_content = "vvtv-content-archive"
+s3_bucket_backups = "vvtv-system-backups"
+s3_bucket_logs = "vvtv-logs-archive"
+
+# EFS configuration
+efs_file_system_id = "fs-0123456789abcdef0"
+efs_mount_point = "/mnt/efs"
+efs_performance_mode = "generalPurpose"
+
+# CloudWatch configuration
+cloudwatch_enabled = true
+cloudwatch_namespace = "VVTV/Production"
+cloudwatch_log_group = "/vvtv/application"
+
+# RDS configuration
+rds_endpoint = "vvtv-primary.cluster-xyz.us-east-1.rds.amazonaws.com"
+rds_port = 5432
+rds_database = "vvtv_production"
+rds_username = "vvtv_user"
+rds_password_secret = "arn:aws:secretsmanager:us-east-1:123456789012:secret:vvtv-db-password"
+
+[quality]
+# Optimized for AWS bandwidth and storage costs
+target_lufs = -14.0
+lufs_tolerance = 1.5
+audio_codec = "aac"
+audio_bitrate = "128k"                    # Slightly lower for bandwidth
+
+# Video quality (balanced for cost/quality)
+vmaf_threshold = 80                       # Slightly lower for cost
+ssim_threshold = 0.90
+target_resolution = "1080p"
+fallback_resolution = "720p"
+
+# HLS optimized for CDN
+hls_segment_duration = 6                  # Longer segments for CDN efficiency
+hls_playlist_length_minutes = 60          # Longer playlist for reliability
+
+[quality.signature]
+profile_path = "/vvtv/system/signature_profile.json"
+max_deviation = 0.40                      # Slightly more tolerant
+palette_size = 4                          # Smaller for performance
+
+[security]
+# AWS security configuration
+sandbox_enabled = true
+fingerprint_randomization = true
+proxy_rotation_enabled = false            # Use AWS NAT Gateway instead
+csam_check_enabled = true
+drm_detection_abort = true
+
+# AWS security groups handle firewall
+allow_rtmp_from = ["0.0.0.0/0"]          # Handled by security groups
+allow_hls_from = ["cdn"]
+allow_ssh_from = ["office_ip"]
+
+[monitoring]
+# AWS CloudWatch integration
+health_check_interval_seconds = 30        # More frequent for AWS
+metrics_collection_interval_seconds = 60  # CloudWatch optimized
+capture_interval_minutes = 2
+alert_cloudwatch_enabled = true
+alert_sns_enabled = true
+
+[communications]
+incident_history_dir = "/vvtv/vault/incident_history"
+
+[communications.routing]
+critical = ["sns", "cloudwatch"]
+high = ["sns"]
+medium = ["cloudwatch"]
+low = ["cloudwatch"]
+
+[communications.sns]
+topic_arn = "arn:aws:sns:us-east-1:123456789012:vvtv-alerts"
+region = "us-east-1"
+
+[communications.cloudwatch]
+log_group = "/vvtv/incidents"
+region = "us-east-1"
+
+[economy]
+monetization_enabled = true
+base_rate_per_minute = 0.0015             # Higher rate for AWS costs
+ledger_export_interval_hours = 12         # More frequent for monitoring
+reconciliation_interval_days = 3
+
+[distribution]
+# BunnyCDN primary (adult-friendly)
+[distribution.cdn_primary]
+provider = "bunnycdn"
+api_key_path = "/vvtv/vault/keys/bunny_api.key"
+zone_id = "your_bunny_zone_id"
+origin_url = "https://origin.vvtv.aws"
+pull_zone_name = "vvtv-streaming"
+
+# Adult content specific settings
+adult_content = true
+geo_blocking_enabled = true
+blocked_countries = ["country_codes_where_restricted"]
+age_verification_required = true
+
+# Performance settings
+cache_ttl_segments = 3600                 # 1 hour
+cache_ttl_manifests = 60                  # 1 minute
+bandwidth_limit_mbps = 1000               # High limit for peak traffic
+
+[distribution.cdn_backup]
+provider = "cloudfront"
+distribution_id = "E1234567890ABC"
+origin_domain = "origin.vvtv.aws"
+alternate_domain = "backup.voulezvous.tv"
+
+[distribution.replication]
+# S3 replication for backup
+source_bucket = "vvtv-content-archive"
+destination_bucket = "vvtv-content-backup"
+replication_role = "arn:aws:iam::123456789012:role/vvtv-replication-role"
+
+[llm]
+# Local LLM configuration (privacy-first for adult content)
+provider = "local_ollama"
+endpoint = "http://10.0.1.100:11434"     # Private subnet LLM node
+timeout_seconds = 30
+max_concurrent_requests = 3
+circuit_breaker_enabled = true
+
+# Models for adult content analysis
+models = [
+    "llama3.1:8b-instruct-q4_K_M",       # Primary content analysis
+    "phi3.5:mini-instruct-q4_K_M"        # Query enhancement
+]
+
+# Privacy settings (critical for adult content)
+external_calls_disabled = true           # Never call external LLM APIs
+content_logging_minimal = true           # Minimal logging for privacy
+adult_content_analysis = true            # Enable adult content analysis
+compliance_mode = true                   # Enable compliance features
+
+[llm.circuit_breaker]
+failure_threshold = 0.3                  # 30% failure rate trips breaker
+window_size = 20                         # 20 request window
+timeout_seconds = 300                    # 5 minute timeout
+
+[storage]
+# AWS storage tiers for cost optimization
+[storage.hot]
+type = "efs"
+mount_point = "/mnt/efs/hot"
+performance_mode = "generalPurpose"
+retention_hours = 48                     # 2 days in hot storage
+
+[storage.warm]
+type = "s3_standard"
+bucket = "vvtv-content-warm"
+retention_days = 30                      # 30 days in warm storage
+lifecycle_enabled = true
+
+[storage.cold]
+type = "s3_glacier_ir"                   # Instant Retrieval
+bucket = "vvtv-content-cold"
+retention_days = 365                     # 1 year in cold storage
+
+[backup]
+# AWS backup strategy
+[backup.automated]
+enabled = true
+schedule = "cron(0 2 * * ? *)"          # Daily at 2 AM UTC
+retention_days = 30
+
+[backup.cross_region]
+enabled = true
+destination_region = "us-west-2"
+retention_days = 90
+
+[compliance]
+# Adult content compliance settings
+adult_content_platform = true
+age_verification_required = true
+content_warnings_enabled = true
+gdpr_compliant = true
+data_retention_max_days = 30             # Privacy-first retention
+
+# Geo-compliance
+geo_restrictions_enabled = true
+restricted_countries = [
+    # Countries where adult content is restricted
+    "country_codes_here"
+]
+
+[performance]
+# AWS performance optimizations
+[performance.encoding]
+preset = "medium"                        # Balanced quality/speed for AWS
+threads = 6                              # Optimized for c6i.2xlarge
+gpu_acceleration = false                 # CPU encoding on primary node
+
+[performance.networking]
+tcp_congestion_control = "bbr"           # Optimized for AWS networking
+buffer_size_kb = 256
+connection_pooling = true
+
+[performance.caching]
+redis_enabled = true
+redis_endpoint = "vvtv-cache.abc123.cache.amazonaws.com:6379"
+cache_ttl_seconds = 3600
+max_memory_mb = 512

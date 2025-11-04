@@ -1,0 +1,359 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "VVTV Operations Overview",
+    "tags": ["vvtv", "operations", "sre"],
+    "style": "dark",
+    "timezone": "UTC",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Health Overview",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "up{job=\"vvtv-streaming\"}",
+            "legendFormat": "Streaming",
+            "refId": "A"
+          },
+          {
+            "expr": "up{job=\"vvtv-llm-pool\"}",
+            "legendFormat": "LLM Pool",
+            "refId": "B"
+          },
+          {
+            "expr": "up{job=\"vvtv-api\"}",
+            "legendFormat": "Public API",
+            "refId": "C"
+          },
+          {
+            "expr": "up{job=\"vvtv-planner\"}",
+            "legendFormat": "Planner",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            },
+            "mappings": [
+              {"options": {"0": {"text": "DOWN"}}, "type": "value"},
+              {"options": {"1": {"text": "UP"}}, "type": "value"}
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "SLO Compliance",
+        "type": "bargauge",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "100 * (1 - rate(stream_segment_age_seconds_bucket{le=\"6\"}[5m]) / rate(stream_segment_age_seconds_count[5m]))",
+            "legendFormat": "Segment Freshness (≤6s)",
+            "refId": "A"
+          },
+          {
+            "expr": "100 * (rate(llmpool_infer_total{status=\"success\"}[5m]) / rate(llmpool_infer_total[5m]))",
+            "legendFormat": "LLM Success Rate",
+            "refId": "B"
+          },
+          {
+            "expr": "100 * (histogram_quantile(0.95, rate(llmpool_infer_duration_ms_bucket[5m])) <= 1200)",
+            "legendFormat": "LLM Latency SLO",
+            "refId": "C"
+          },
+          {
+            "expr": "100 * (queue_buffer_duration_minutes >= 30)",
+            "legendFormat": "Queue Buffer SLO",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 95},
+                {"color": "green", "value": 99}
+              ]
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Active Alerts",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "ALERTS{alertstate=\"firing\"}",
+            "format": "table",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "alertname"},
+              "properties": [{"id": "displayName", "value": "Alert"}]
+            },
+            {
+              "matcher": {"id": "byName", "options": "severity"},
+              "properties": [
+                {"id": "displayName", "value": "Severity"},
+                {
+                  "id": "color",
+                  "value": {
+                    "mode": "thresholds",
+                    "thresholds": {
+                      "steps": [
+                        {"color": "green", "value": null},
+                        {"color": "yellow", "value": "warning"},
+                        {"color": "orange", "value": "major"},
+                        {"color": "red", "value": "critical"}
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 4,
+        "title": "Stream Health",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "stream_segment_age_seconds",
+            "legendFormat": "Segment Age (s)",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(stream_encoder_drops_total[5m]) * 100",
+            "legendFormat": "Encoder Drop Rate (%)",
+            "refId": "B"
+          },
+          {
+            "expr": "stream_bitrate_mbps",
+            "legendFormat": "Bitrate (Mbps)",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {"legend": false, "tooltip": false, "vis": false},
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "scaleDistribution": {"type": "linear"},
+              "showPoints": "never",
+              "spanNulls": false,
+              "stacking": {"group": "A", "mode": "none"},
+              "thresholdsStyle": {"mode": "off"}
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "LLM Pool Performance",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(llmpool_infer_duration_ms_bucket[5m]))",
+            "legendFormat": "P95 Latency (ms)",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(llmpool_infer_total[5m]) * 60",
+            "legendFormat": "Requests/min",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(llmpool_cache_hits_total[5m]) / rate(llmpool_cache_requests_total[5m]) * 100",
+            "legendFormat": "Cache Hit Rate (%)",
+            "refId": "C"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "System Resources",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "100 - (avg(irate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "CPU Usage (%)",
+            "refId": "A"
+          },
+          {
+            "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+            "legendFormat": "Memory Usage (%)",
+            "refId": "B"
+          },
+          {
+            "expr": "(1 - (node_filesystem_avail_bytes{mountpoint=\"/vvtv\"} / node_filesystem_size_bytes{mountpoint=\"/vvtv\"})) * 100",
+            "legendFormat": "Disk Usage (%)",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 70},
+                {"color": "red", "value": 90}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Queue Status",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+        "targets": [
+          {
+            "expr": "queue_buffer_duration_minutes",
+            "legendFormat": "Buffer (min)",
+            "refId": "A"
+          },
+          {
+            "expr": "queue_length",
+            "legendFormat": "Queue Length",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(queue_items_processed_total[5m]) * 60",
+            "legendFormat": "Items/min",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 30},
+                {"color": "green", "value": 60}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Business Logic Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 24, "x": 0, "y": 28},
+        "targets": [
+          {
+            "expr": "business_logic_config_valid",
+            "legendFormat": "Config Valid",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(curator_interventions_total[1h]) * 3600",
+            "legendFormat": "Curator Interventions/h",
+            "refId": "B"
+          },
+          {
+            "expr": "autopilot_enabled",
+            "legendFormat": "Autopilot Enabled",
+            "refId": "C"
+          },
+          {
+            "expr": "llm_circuit_breaker_open",
+            "legendFormat": "LLM Circuit Breaker",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            },
+            "mappings": [
+              {"options": {"0": {"text": "OFF"}}, "type": "value"},
+              {"options": {"1": {"text": "ON"}}, "type": "value"}
+            ]
+          }
+        }
+      }
+    ],
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "prometheus",
+          "enable": true,
+          "expr": "increase(vvtv_deployment_total[1m])",
+          "iconColor": "blue",
+          "titleFormat": "Deployment",
+          "textFormat": "{{service}} deployed"
+        },
+        {
+          "name": "Incidents",
+          "datasource": "prometheus", 
+          "enable": true,
+          "expr": "increase(vvtv_incident_total[1m])",
+          "iconColor": "red",
+          "titleFormat": "Incident",
+          "textFormat": "{{severity}} incident: {{description}}"
+        }
+      ]
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "instance",
+          "type": "query",
+          "query": "label_values(up{job=~\"vvtv.*\"}, instance)",
+          "refresh": 1,
+          "includeAll": true,
+          "allValue": ".*"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,261 @@
+{
+  "generated_at": "2025-10-21T19:41:11Z",
+  "risks": [
+    {
+      "id": "R1",
+      "title": "Violação de DRM/EME ao simular play",
+      "probability": "Alta",
+      "impact": "Crítico",
+      "owner": "Eng. Automação / Jurídico",
+      "mitigation": [
+        "Detectar EME e abortar imediatamente",
+        "Manter whitelist de fontes com licença explícita",
+        "Registrar provas de autorização em plans.sqlite"
+      ],
+      "sla_minutes": 60
+    },
+    {
+      "id": "R2",
+      "title": "Uso indevido de imagem / conteúdo sem consentimento",
+      "probability": "Média",
+      "impact": "Crítico",
+      "owner": "Curador / Jurídico",
+      "mitigation": [
+        "Aplicar license-first policy",
+        "Verificar contratos e prova de idade",
+        "Executar hash-match CSAM antes do download"
+      ],
+      "sla_minutes": 240
+    },
+    {
+      "id": "R3",
+      "title": "CSAM (material ilegal)",
+      "probability": "Baixa",
+      "impact": "Catastrófico",
+      "owner": "Compliance",
+      "mitigation": [
+        "Hash-match automático (PhotoDNA ou equivalente)",
+        "Isolar imediatamente o conteúdo",
+        "Notificar autoridades e bloquear fonte"
+      ],
+      "sla_minutes": 0
+    },
+    {
+      "id": "R4",
+      "title": "Violação GDPR / coleta excessiva",
+      "probability": "Média",
+      "impact": "Alto",
+      "owner": "DPO / Eng. Dados",
+      "mitigation": [
+        "Anonimizar IPs e limitar retenção a 30 dias",
+        "Manter política clara de privacidade",
+        "Implementar banner de consentimento"
+      ],
+      "sla_minutes": 1440
+    },
+    {
+      "id": "R5",
+      "title": "Fila de streaming vazia (buffer underflow)",
+      "probability": "Alta",
+      "impact": "Alto",
+      "owner": "Eng. Operações",
+      "mitigation": [
+        "Manter buffer alvo de 6–8h",
+        "Executar loop de emergência local",
+        "Alertar quando buffer <3h"
+      ],
+      "sla_minutes": 15
+    },
+    {
+      "id": "R6",
+      "title": "Downloads corrompidos (tokens expirados)",
+      "probability": "Média",
+      "impact": "Médio",
+      "owner": "Eng. Curadoria",
+      "mitigation": [
+        "Baixar apenas VOD estático",
+        "Validar integridade com ffprobe",
+        "Retry em 5 minutos"
+      ],
+      "sla_minutes": 120
+    },
+    {
+      "id": "R7",
+      "title": "Explosão de inodes / IO por segmentação HLS",
+      "probability": "Alta",
+      "impact": "Médio",
+      "owner": "Infra / Storage",
+      "mitigation": [
+        "Compactar segmentos antigos",
+        "Aplicar TTL curta",
+        "Gerar tarball diário de VOD"
+      ],
+      "sla_minutes": 360
+    },
+    {
+      "id": "R8",
+      "title": "Exploit em ffmpeg / navegador headless",
+      "probability": "Média",
+      "impact": "Crítico",
+      "owner": "Eng. Segurança",
+      "mitigation": [
+        "Aplicar sandboxing e namespaces",
+        "Manter atualizações pinadas",
+        "Aplicar no-exec em /tmp e varscan diário"
+      ],
+      "sla_minutes": 120
+    },
+    {
+      "id": "R9",
+      "title": "Banimento de CDN / host",
+      "probability": "Média",
+      "impact": "Crítico",
+      "owner": "Ops / Legal",
+      "mitigation": [
+        "Contratar CDN compatível com conteúdo adulto",
+        "Manter CDN backup com cutover automático",
+        "Monitorar erros de origem"
+      ],
+      "sla_minutes": 30
+    },
+    {
+      "id": "R10",
+      "title": "Problema com monetização / congelamento de pagamentos",
+      "probability": "Média",
+      "impact": "Alto",
+      "owner": "Financeiro / Legal",
+      "mitigation": [
+        "Usar processadores compatíveis",
+        "Assinar ledger econômico",
+        "Executar reconciliação semanal"
+      ],
+      "sla_minutes": 1440
+    },
+    {
+      "id": "R11",
+      "title": "Latência alta (>9s)",
+      "probability": "Média",
+      "impact": "Médio",
+      "owner": "Eng. Vídeo",
+      "mitigation": [
+        "Ajustar pipeline HLS clássico",
+        "Considerar Low-Latency HLS",
+        "Configurar TTL curta no manifest"
+      ],
+      "sla_minutes": 240
+    },
+    {
+      "id": "R12",
+      "title": "Fingerprint bloqueado / anti-bot",
+      "probability": "Alta",
+      "impact": "Médio",
+      "owner": "Eng. Automação",
+      "mitigation": [
+        "Rotacionar perfis e fingerprints",
+        "Evitar comportamento repetitivo",
+        "Aplicar retries com troca de IP"
+      ],
+      "sla_minutes": 120
+    },
+    {
+      "id": "R13",
+      "title": "Falha em logs (sem spans)",
+      "probability": "Média",
+      "impact": "Médio",
+      "owner": "Eng. Observabilidade",
+      "mitigation": [
+        "Manter contadores por etapa",
+        "Registrar últimos 100 erros",
+        "Disponibilizar modo médico"
+      ],
+      "sla_minutes": 60
+    },
+    {
+      "id": "R14",
+      "title": "Falha elétrica / sobrecarga térmica",
+      "probability": "Baixa",
+      "impact": "Alto",
+      "owner": "Eng. Infraestrutura",
+      "mitigation": [
+        "UPS 2000 VA e sensores de temperatura",
+        "Limpeza trimestral",
+        "Alertas remotos automáticos"
+      ],
+      "sla_minutes": 10
+    },
+    {
+      "id": "R15",
+      "title": "Incidente jurídico / bloqueio CNPD",
+      "probability": "Baixa",
+      "impact": "Crítico",
+      "owner": "Jurídico / DPO",
+      "mitigation": [
+        "Garantir conformidade GDPR",
+        "Cooperar com autoridades",
+        "Registrar logs de consentimento"
+      ],
+      "sla_minutes": 720
+    }
+  ],
+  "metric_triggers": [
+    {
+      "risk_id": "R5",
+      "description": "Buffer < 3h",
+      "source": "queue.sqlite",
+      "metric": "buffer_hours",
+      "threshold": 3,
+      "comparison": "<",
+      "action": "Executar check_queue.sh e, se <2h, inject_emergency_loop.sh"
+    },
+    {
+      "risk_id": "R11",
+      "description": "Latência média > 9s",
+      "source": "metrics.sqlite",
+      "metric": "latency_s",
+      "threshold": 9,
+      "comparison": ">",
+      "action": "Reconfigurar HLS e revisar CDN"
+    },
+    {
+      "risk_id": "R14",
+      "description": "Temperatura CPU > 75°C",
+      "source": "metrics.sqlite",
+      "metric": "avg_temp_c",
+      "threshold": 75,
+      "comparison": ">",
+      "action": "Acionar check_thermal.sh e inspeção física"
+    }
+  ],
+  "review_schedule": [
+    {
+      "action": "Auditoria legal / consentimento",
+      "frequency": "Mensal",
+      "owner": "Jurídico",
+      "deliverable": "VVTV_Compliance_Audit.md"
+    },
+    {
+      "action": "Teste de buffer e loop de emergência",
+      "frequency": "Semanal",
+      "owner": "Eng. Vídeo",
+      "deliverable": "buffer_test.log"
+    },
+    {
+      "action": "Sandbox integrity check",
+      "frequency": "Diário",
+      "owner": "Eng. Segurança",
+      "deliverable": "security_check_report.json"
+    },
+    {
+      "action": "Monitoramento UPS e temperatura",
+      "frequency": "Contínuo",
+      "owner": "Infraestrutura",
+      "deliverable": "Alertas Telegram/Email"
+    },
+    {
+      "action": "Revisão de monetização",
+      "frequency": "Quinzenal",
+      "owner": "Financeiro",
+      "deliverable": "ledger_reconciliation.csv"
+    }
+  ]
+}

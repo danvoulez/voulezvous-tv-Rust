@@ -1,0 +1,1453 @@
+mod error;
+mod types;
+
+use std::collections::HashMap;
+use std::env;
+use std::ffi::{OsStr, OsString};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use chrono::Utc;
+use hex::encode as hex_encode;
+use reqwest::Client;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
+use tokio::time::sleep;
+use tracing::{info, warn};
+use url::Url;
+
+use crate::browser::{BrowserAutomation, BrowserCaptureKind, PbdOutcome, PlayBeforeDownload};
+use crate::config::{ProcessorConfig, VvtvConfig};
+use crate::plan::{Plan, PlanStatus, SqlitePlanStore};
+use crate::quality::{
+    PreQcReport, QualityAction, QualityActionKind, QualityAnalyzer, QualityReport,
+    QualityThresholds, SignatureFilters, SignatureProfile,
+};
+use crate::queue::{PlayoutQueueStore, QueueItem};
+
+pub use error::{ProcessorError, ProcessorResult};
+pub use types::{
+    DashDownload, DownloadedMedia, HlsDownload, MasteringOutcome, MasteringStrategy,
+    MediaDescriptor, PackagingArtifacts, ProcessorReport, ProgressiveDownload, QcArtifacts,
+    RetryPolicy, RevalidationOutcome, SegmentRecord, StagingPaths,
+};
+
+pub const MASTER_PLAYLIST_NAME: &str = "master.m3u8";
+
+const HLS_SEGMENT_PREFIX_720: &str = "hls_720p";
+const HLS_SEGMENT_PREFIX_480: &str = "hls_480p";
+
+#[derive(Clone)]
+pub struct Processor {
+    plan_store: SqlitePlanStore,
+    queue_store: PlayoutQueueStore,
+    pbd: Option<Arc<PlayBeforeDownload>>,
+    processor_config: Arc<ProcessorConfig>,
+    vvtv_config: Arc<VvtvConfig>,
+    http_client: Client,
+    log_path: PathBuf,
+    retry_policy: RetryPolicy,
+    retry_sleep_cap: Duration,
+    quality_thresholds: QualityThresholds,
+    signature_profile: Arc<SignatureProfile>,
+}
+
+impl Processor {
+    pub fn new(
+        plan_store: SqlitePlanStore,
+        queue_store: PlayoutQueueStore,
+        processor_config: ProcessorConfig,
+        vvtv_config: VvtvConfig,
+    ) -> ProcessorResult<Self> {
+        let quality_thresholds = QualityThresholds::from_configs(&processor_config, &vvtv_config);
+        let signature_profile = vvtv_config
+            .quality
+            .signature
+            .as_ref()
+            .map(|signature_cfg| {
+                let resolved = vvtv_config.resolve_path(&signature_cfg.profile_path);
+                match SignatureProfile::load(&resolved) {
+                    Ok(mut profile) => {
+                        profile.max_deviation = signature_cfg.max_deviation;
+                        profile.palette_size = signature_cfg.palette_size;
+                        Arc::new(profile)
+                    }
+                    Err(err) => {
+                        warn!(
+                            path = %resolved.display(),
+                            error = %err,
+                            "using default signature profile"
+                        );
+                        Arc::new(SignatureProfile::default_profile())
+                    }
+                }
+            })
+            .unwrap_or_else(|| Arc::new(SignatureProfile::default_profile()));
+        let processor_config = Arc::new(processor_config);
+        let vvtv_config = Arc::new(vvtv_config);
+        let http_client = Client::builder()
+            .user_agent("VVTV-Processor/1.0")
+            .build()
+            .map_err(|err| ProcessorError::Network(err.to_string()))?;
+        let log_path = Path::new(&vvtv_config.paths.logs_dir).join("processor_failures.log");
+        if let Some(parent) = log_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| ProcessorError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let retry_policy = RetryPolicy::try_from(processor_config.download.clone())?;
+        Ok(Self {
+            plan_store,
+            queue_store,
+            pbd: None,
+            processor_config,
+            vvtv_config,
+            http_client,
+            log_path,
+            retry_policy,
+            retry_sleep_cap: Duration::from_secs(60),
+            quality_thresholds,
+            signature_profile,
+        })
+    }
+
+    pub fn with_play_before_download(mut self, pbd: Arc<PlayBeforeDownload>) -> Self {
+        self.pbd = Some(pbd);
+        self
+    }
+
+    pub fn with_retry_sleep_cap(mut self, cap: Duration) -> Self {
+        self.retry_sleep_cap = cap;
+        self
+    }
+
+    fn quality_analyzer(&self) -> QualityAnalyzer {
+        QualityAnalyzer::new(
+            self.quality_thresholds.clone(),
+            self.signature_profile.clone(),
+        )
+    }
+
+    pub async fn capture_and_process(
+        &self,
+        automation: &BrowserAutomation,
+        plan: &Plan,
+    ) -> ProcessorResult<ProcessorReport> {
+        let pbd = self.pbd.as_ref().ok_or_else(|| {
+            ProcessorError::InvalidMedia("PlayBeforeDownload not configured".into())
+        })?;
+        let source_url =
+            plan.source_url
+                .as_deref()
+                .ok_or_else(|| ProcessorError::MissingSourceUrl {
+                    plan_id: plan.plan_id.clone(),
+                })?;
+        let outcome = pbd.collect(automation, source_url).await?;
+        self.process_with_capture(plan, outcome).await
+    }
+
+    pub async fn process_with_capture(
+        &self,
+        plan: &Plan,
+        capture: PbdOutcome,
+    ) -> ProcessorResult<ProcessorReport> {
+        let hd_missing = capture.validation.video_height < 720;
+        let staging = self.prepare_staging(&plan.plan_id).await?;
+        let revalidation = RevalidationOutcome {
+            capture: capture.capture.clone(),
+            validation: capture.validation.clone(),
+            metadata: capture.metadata.clone(),
+            hd_missing,
+            timestamp: Utc::now(),
+        };
+
+        let download_operation =
+            || async { self.download_media(plan, &staging, &revalidation).await };
+        let downloaded = self.retry_operation("download", download_operation).await?;
+
+        let mastering = self
+            .prepare_master(plan, &revalidation, &downloaded)
+            .await?;
+        let (mastering, pre_qc_report, qc_actions) = self
+            .ensure_master_quality(plan, &downloaded, mastering)
+            .await?;
+        let packaging = self
+            .package_media(plan, &revalidation, &downloaded, &mastering)
+            .await?;
+        let qc = self
+            .run_quality_control(
+                plan,
+                &revalidation,
+                &mastering,
+                &packaging,
+                pre_qc_report,
+                qc_actions,
+            )
+            .await?;
+
+        let adjusted_score = self.apply_quality_feedback(plan, &qc.report)?;
+        if qc.report.qc_warning {
+            if let Err(err) = self.plan_store.record_attempt(
+                &plan.plan_id,
+                Some(plan.status.clone()),
+                Some(PlanStatus::Edited),
+                format!("qc warnings: {}", qc.report.warnings.join(" | ")),
+            ) {
+                warn!(
+                    plan_id = %plan.plan_id,
+                    error = %err,
+                    "failed to record qc warning in plan attempts"
+                );
+            }
+        }
+
+        self.update_plan_record(plan, &revalidation).await?;
+        self.enqueue_plan(plan, &packaging, adjusted_score).await?;
+        self.cleanup_staging(&staging).await?;
+
+        let report = ProcessorReport::new(
+            &plan.plan_id,
+            mastering.strategy.clone(),
+            revalidation.hd_missing,
+            packaging.duration,
+            packaging.artifact_paths.clone(),
+        );
+        Ok(report)
+    }
+
+    async fn prepare_staging(&self, plan_id: &str) -> ProcessorResult<StagingPaths> {
+        let staging_root = Path::new(&self.vvtv_config.paths.cache_dir)
+            .join("tmp_downloads")
+            .join(plan_id);
+        let staging = StagingPaths::new(staging_root);
+        fs::create_dir_all(&staging.source)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: staging.source.clone(),
+                source,
+            })?;
+        fs::create_dir_all(&staging.remux)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: staging.remux.clone(),
+                source,
+            })?;
+        fs::create_dir_all(&staging.logs)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: staging.logs.clone(),
+                source,
+            })?;
+        Ok(staging)
+    }
+
+    async fn download_media(
+        &self,
+        plan: &Plan,
+        staging: &StagingPaths,
+        revalidation: &RevalidationOutcome,
+    ) -> ProcessorResult<DownloadedMedia> {
+        match revalidation.capture.kind {
+            BrowserCaptureKind::HlsMediaPlaylist | BrowserCaptureKind::HlsMaster => {
+                self.download_hls(plan, staging, revalidation).await
+            }
+            BrowserCaptureKind::DashManifest => {
+                self.download_dash(plan, staging, revalidation).await
+            }
+            BrowserCaptureKind::Progressive => {
+                self.download_progressive(plan, staging, revalidation).await
+            }
+            BrowserCaptureKind::Unknown => Err(ProcessorError::Download(
+                "captured media kind is unknown".into(),
+            )),
+        }
+    }
+
+    async fn download_hls(
+        &self,
+        _plan: &Plan,
+        staging: &StagingPaths,
+        revalidation: &RevalidationOutcome,
+    ) -> ProcessorResult<DownloadedMedia> {
+        let playlist_url = &revalidation.capture.url;
+        let playlist_contents = self.fetch_text(playlist_url).await?;
+        let playlist = HlsPlaylist::parse(&playlist_contents)
+            .map_err(|err| ProcessorError::Download(format!("invalid HLS playlist: {err}")))?;
+        let original_path = staging.source.join("original.m3u8");
+        fs::write(&original_path, playlist_contents)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: original_path.clone(),
+                source,
+            })?;
+
+        let mut local_segments = Vec::new();
+        for (index, segment) in playlist.segments.iter().enumerate() {
+            let resolved = self.resolve_segment_url(playlist_url, &segment.uri)?;
+            let extension = segment
+                .uri
+                .rsplit_once('.')
+                .map(|(_, ext)| format!(".{ext}"))
+                .unwrap_or_else(|| ".m4s".to_string());
+            let local_name = format!("seg_{:04}{}", index + 1, extension);
+            let local_path = staging.source.join(&local_name);
+            self.fetch_to_file(&resolved, &local_path).await?;
+            local_segments.push(SegmentRecord {
+                index,
+                duration: segment.duration,
+                original_uri: resolved,
+                local_path,
+            });
+        }
+
+        if local_segments.is_empty() {
+            return Err(ProcessorError::Download(
+                "HLS playlist does not contain segments".into(),
+            ));
+        }
+
+        let rewritten_path = staging.source.join("index.m3u8");
+        let mut rewritten = String::new();
+        rewritten.push_str("#EXTM3U\n");
+        rewritten.push_str(&format!("#EXT-X-VERSION:{}\n", playlist.version));
+        rewritten.push_str(&format!(
+            "#EXT-X-TARGETDURATION:{}\n",
+            playlist.target_duration
+        ));
+        rewritten.push_str(&format!(
+            "#EXT-X-MEDIA-SEQUENCE:{}\n",
+            playlist.media_sequence
+        ));
+        for segment in &local_segments {
+            rewritten.push_str(&format!("#EXTINF:{:.3},\n", segment.duration));
+            if let Some(name) = segment.local_path.file_name() {
+                rewritten.push_str(&format!("{}\n", name.to_string_lossy()));
+            }
+        }
+        rewritten.push_str("#EXT-X-ENDLIST\n");
+        fs::write(&rewritten_path, rewritten)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: rewritten_path.clone(),
+                source,
+            })?;
+
+        let total_duration: f64 = local_segments.iter().map(|s| s.duration).sum();
+        Ok(DownloadedMedia::Hls(HlsDownload {
+            playlist_path: original_path,
+            rewritten_playlist: rewritten_path,
+            segments: local_segments,
+            media_sequence: playlist.media_sequence,
+            target_duration: playlist.target_duration,
+            total_duration,
+        }))
+    }
+
+    async fn download_dash(
+        &self,
+        _plan: &Plan,
+        staging: &StagingPaths,
+        revalidation: &RevalidationOutcome,
+    ) -> ProcessorResult<DownloadedMedia> {
+        let manifest_url = &revalidation.capture.url;
+        let manifest_contents = self.fetch_text(manifest_url).await?;
+        let manifest_path = staging.source.join("manifest.mpd");
+        fs::write(&manifest_path, manifest_contents.as_bytes())
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: manifest_path.clone(),
+                source,
+            })?;
+        let segments = DashManifest::parse(&manifest_contents)
+            .map_err(|err| ProcessorError::Download(format!("invalid DASH manifest: {err}")))?;
+
+        let mut local_segments = Vec::new();
+        for (index, segment) in segments.iter().enumerate() {
+            let resolved = self.resolve_segment_url(manifest_url, &segment.uri)?;
+            let extension = segment
+                .uri
+                .rsplit_once('.')
+                .map(|(_, ext)| format!(".{ext}"))
+                .unwrap_or_else(|| ".m4s".to_string());
+            let local_name = format!("dash_{:04}{}", index + 1, extension);
+            let local_path = staging.source.join(&local_name);
+            self.fetch_to_file(&resolved, &local_path).await?;
+            local_segments.push(SegmentRecord {
+                index,
+                duration: segment.duration,
+                original_uri: resolved,
+                local_path,
+            });
+        }
+        if local_segments.is_empty() {
+            return Err(ProcessorError::Download(
+                "DASH manifest does not contain media segments".into(),
+            ));
+        }
+        let total_duration: f64 = local_segments.iter().map(|s| s.duration).sum();
+        Ok(DownloadedMedia::Dash(DashDownload {
+            manifest_path,
+            segments: local_segments,
+            total_duration,
+        }))
+    }
+
+    async fn download_progressive(
+        &self,
+        _plan: &Plan,
+        staging: &StagingPaths,
+        revalidation: &RevalidationOutcome,
+    ) -> ProcessorResult<DownloadedMedia> {
+        let url = &revalidation.capture.url;
+        let local_path = staging.source.join("source.mp4");
+        self.fetch_to_file(url, &local_path).await?;
+        let metadata = fs::metadata(&local_path)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: local_path.clone(),
+                source,
+            })?;
+        Ok(DownloadedMedia::Progressive(ProgressiveDownload {
+            file_path: local_path,
+            size_bytes: metadata.len(),
+        }))
+    }
+
+    async fn prepare_master(
+        &self,
+        plan: &Plan,
+        revalidation: &RevalidationOutcome,
+        downloaded: &DownloadedMedia,
+    ) -> ProcessorResult<MasteringOutcome> {
+        let ready_dir = self.ready_directory(&plan.plan_id);
+        fs::create_dir_all(&ready_dir)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: ready_dir.clone(),
+                source,
+            })?;
+
+        let mut descriptor = MediaDescriptor {
+            container: "mp4".into(),
+            video_codec: "avc1".into(),
+            audio_codec: "aac".into(),
+            width: revalidation.validation.video_width,
+            height: revalidation.validation.video_height,
+            duration: downloaded.duration(),
+        };
+
+        let supports_copy = matches!(
+            downloaded,
+            DownloadedMedia::Hls(_) | DownloadedMedia::Progressive(_)
+        ) && self.processor_config.remux.prefer_copy;
+        let strategy = if supports_copy {
+            MasteringStrategy::Remux
+        } else {
+            MasteringStrategy::Transcode
+        };
+
+        let master_path = ready_dir.join("master.mp4");
+        match downloaded {
+            DownloadedMedia::Progressive(progressive)
+                if matches!(strategy, MasteringStrategy::Remux) =>
+            {
+                self.copy_file(&progressive.file_path, &master_path).await?;
+            }
+            DownloadedMedia::Hls(hls) if matches!(strategy, MasteringStrategy::Remux) => {
+                self.write_remux_stub(&master_path, "hls", &hls.segments)
+                    .await?;
+                descriptor.container = "hls".into();
+            }
+            DownloadedMedia::Dash(dash) if matches!(strategy, MasteringStrategy::Remux) => {
+                self.write_remux_stub(&master_path, "dash", &dash.segments)
+                    .await?;
+                descriptor.container = "dash".into();
+            }
+            _ => {
+                self.transcode_media(&master_path, downloaded).await?;
+            }
+        }
+
+        let normalized_path = if self.processor_config.loudnorm.enabled {
+            let normalized = ready_dir.join("master_normalized.mp4");
+            self.write_loudnorm_stub(&master_path, &normalized).await?;
+            normalized
+        } else {
+            master_path.clone()
+        };
+
+        Ok(MasteringOutcome {
+            master_path,
+            normalized_path,
+            descriptor,
+            strategy,
+        })
+    }
+
+    async fn package_media(
+        &self,
+        plan: &Plan,
+        revalidation: &RevalidationOutcome,
+        downloaded: &DownloadedMedia,
+        mastering: &MasteringOutcome,
+    ) -> ProcessorResult<PackagingArtifacts> {
+        let ready_dir = self.ready_directory(&plan.plan_id);
+        let chosen_playlist = ready_dir.join(format!("{HLS_SEGMENT_PREFIX_720}.m3u8"));
+        let playlist_480 = ready_dir.join(format!("{HLS_SEGMENT_PREFIX_480}.m3u8"));
+
+        let segments_720 = self
+            .emit_hls_variant(
+                &ready_dir,
+                &mastering.normalized_path,
+                downloaded,
+                HLS_SEGMENT_PREFIX_720,
+            )
+            .await?;
+        let segments_480 = self
+            .emit_hls_variant(
+                &ready_dir,
+                &mastering.normalized_path,
+                downloaded,
+                HLS_SEGMENT_PREFIX_480,
+            )
+            .await?;
+
+        let duration = downloaded
+            .duration()
+            .or_else(|| revalidation.validation.duration_seconds.map(|v| v as f64));
+
+        let playlist_720_contents = self.build_variant_playlist(&segments_720);
+        fs::write(&chosen_playlist, playlist_720_contents)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: chosen_playlist.clone(),
+                source,
+            })?;
+
+        let playlist_480_contents = self.build_variant_playlist(&segments_480);
+        fs::write(&playlist_480, playlist_480_contents)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: playlist_480.clone(),
+                source,
+            })?;
+
+        let mut artifact_paths = Vec::new();
+        artifact_paths.push(mastering.master_path.clone());
+        if mastering.normalized_path != mastering.master_path {
+            artifact_paths.push(mastering.normalized_path.clone());
+        }
+        artifact_paths.push(chosen_playlist.clone());
+        artifact_paths.push(playlist_480.clone());
+        artifact_paths.extend(segments_720.iter().map(|(_, path)| path.clone()));
+        artifact_paths.extend(segments_480.iter().map(|(_, path)| path.clone()));
+
+        Ok(PackagingArtifacts {
+            ready_dir,
+            master_path: mastering.master_path.clone(),
+            normalized_master: mastering.normalized_path.clone(),
+            playlists: vec![chosen_playlist.clone(), playlist_480.clone()],
+            artifact_paths,
+            chosen_playlist,
+            duration,
+        })
+    }
+
+    async fn ensure_master_quality(
+        &self,
+        plan: &Plan,
+        downloaded: &DownloadedMedia,
+        mut mastering: MasteringOutcome,
+    ) -> ProcessorResult<(MasteringOutcome, PreQcReport, Vec<QualityAction>)> {
+        let analyzer = self.quality_analyzer();
+        let mut actions = Vec::new();
+        let mut report = analyzer
+            .analyze_pre(&mastering.normalized_path)
+            .await
+            .map_err(ProcessorError::from)?;
+        if !report.within_thresholds
+            && matches!(mastering.strategy, MasteringStrategy::Remux)
+            && self.processor_config.remux.fallback_transcode
+        {
+            warn!(
+                plan_id = %plan.plan_id,
+                width = report.width,
+                height = report.height,
+                "pre-qc thresholds failed, triggering transcode fallback"
+            );
+            self.transcode_media(&mastering.master_path, downloaded)
+                .await?;
+            if self.processor_config.loudnorm.enabled {
+                let normalized = mastering
+                    .master_path
+                    .parent()
+                    .map(|dir| dir.join("master_normalized.mp4"))
+                    .unwrap_or_else(|| {
+                        mastering
+                            .master_path
+                            .with_file_name("master_normalized.mp4")
+                    });
+                self.write_loudnorm_stub(&mastering.master_path, &normalized)
+                    .await?;
+                mastering.normalized_path = normalized;
+            } else {
+                mastering.normalized_path = mastering.master_path.clone();
+            }
+            mastering.strategy = MasteringStrategy::Transcode;
+            mastering.descriptor.container = "mp4".into();
+            mastering.descriptor.video_codec = "h264".into();
+            report = analyzer
+                .analyze_pre(&mastering.normalized_path)
+                .await
+                .map_err(ProcessorError::from)?;
+            actions.push(QualityAction {
+                kind: QualityActionKind::TranscodeFallback,
+                description: "fallback para transcode após reprovação de pré-QC".into(),
+            });
+        }
+        mastering.descriptor.width = report.width;
+        mastering.descriptor.height = report.height;
+        mastering.descriptor.duration = Some(report.duration_seconds);
+        Ok((mastering, report, actions))
+    }
+
+    async fn run_quality_control(
+        &self,
+        plan: &Plan,
+        revalidation: &RevalidationOutcome,
+        mastering: &MasteringOutcome,
+        packaging: &PackagingArtifacts,
+        pre_qc: PreQcReport,
+        actions: Vec<QualityAction>,
+    ) -> ProcessorResult<QcArtifacts> {
+        let ready_dir = &packaging.ready_dir;
+        let qc_report_path = ready_dir.join("qc_pre.json");
+        let checksums_path = ready_dir.join("checksums.json");
+        let manifest_path = ready_dir.join("manifest.json");
+
+        let analyzer = self.quality_analyzer();
+        let (frame_path, placeholder_frame) = analyzer
+            .capture_reference_frame(&mastering.normalized_path, ready_dir)
+            .await
+            .map_err(ProcessorError::from)?;
+        let mid_report = analyzer
+            .analyze_mid(&mastering.normalized_path, Some(&frame_path))
+            .await
+            .map_err(ProcessorError::from)?;
+        let signature_report = analyzer
+            .analyze_signature(&frame_path, placeholder_frame)
+            .map_err(ProcessorError::from)?;
+        let quality_report = analyzer.compose_report(pre_qc, mid_report, signature_report, actions);
+
+        fs::write(&qc_report_path, serde_json::to_vec_pretty(&quality_report)?)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: qc_report_path.clone(),
+                source,
+            })?;
+
+        let mut checksums = HashMap::new();
+        for path in &packaging.artifact_paths {
+            if let Ok(relative) = path.strip_prefix(ready_dir) {
+                if let Some(rel) = relative.to_str() {
+                    let checksum = self.compute_sha256(path).await?;
+                    checksums.insert(rel.to_string(), checksum);
+                }
+            }
+        }
+        fs::write(&checksums_path, serde_json::to_vec_pretty(&checksums)?)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: checksums_path.clone(),
+                source,
+            })?;
+
+        let manifest = Manifest {
+            plan_id: plan.plan_id.clone(),
+            source: revalidation.capture.url.clone(),
+            capture_kind: format!("{:?}", revalidation.capture.kind),
+            resolution: format!(
+                "{}x{}",
+                revalidation.validation.video_width, revalidation.validation.video_height
+            ),
+            strategy: mastering.strategy.clone(),
+            duration: packaging.duration,
+            playlists: packaging
+                .playlists
+                .iter()
+                .filter_map(|path| path.file_name().map(|n| n.to_string_lossy().to_string()))
+                .collect(),
+            created_at: Utc::now(),
+            quality: ManifestQuality::from_report(&quality_report, &frame_path, ready_dir),
+        };
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: manifest_path.clone(),
+                source,
+            })?;
+
+        Ok(QcArtifacts {
+            qc_report: qc_report_path,
+            checksums: checksums_path,
+            manifest: manifest_path,
+            signature_frame: frame_path,
+            report: quality_report,
+        })
+    }
+
+    fn apply_quality_feedback(&self, plan: &Plan, report: &QualityReport) -> ProcessorResult<f64> {
+        let mut score = plan.curation_score;
+        let signature_threshold = self.quality_thresholds.signature_max_deviation;
+        if report.signature.signature_deviation > signature_threshold {
+            score *= 0.92;
+        } else if report.signature.signature_deviation < signature_threshold * 0.4 {
+            score *= 1.05;
+        }
+        if report.mid.black_ratio > self.quality_thresholds.black_frame_ratio {
+            score *= 0.9;
+        }
+        if report.qc_warning {
+            score *= 0.95;
+        }
+        if score.is_nan() {
+            score = plan.curation_score;
+        }
+        score = score.clamp(0.0, 1.0);
+        if (score - plan.curation_score).abs() > f64::EPSILON {
+            self.plan_store.update_score(&plan.plan_id, score)?;
+        }
+        Ok(score)
+    }
+
+    async fn update_plan_record(
+        &self,
+        plan: &Plan,
+        revalidation: &RevalidationOutcome,
+    ) -> ProcessorResult<()> {
+        let resolution_label = format!("{}p", revalidation.validation.video_height);
+        self.plan_store.mark_edited(
+            &plan.plan_id,
+            revalidation.hd_missing,
+            Some(&resolution_label),
+        )?;
+        self.plan_store.record_attempt(
+            &plan.plan_id,
+            Some(plan.status.clone()),
+            Some(PlanStatus::Edited),
+            "processor pipeline completed",
+        )?;
+        Ok(())
+    }
+
+    async fn enqueue_plan(
+        &self,
+        plan: &Plan,
+        packaging: &PackagingArtifacts,
+        score: f64,
+    ) -> ProcessorResult<()> {
+        let asset_path = packaging.chosen_playlist.to_string_lossy().to_string();
+        let item = QueueItem {
+            plan_id: plan.plan_id.clone(),
+            asset_path,
+            duration_s: packaging.duration.map(|d| d.round() as i64),
+            curation_score: Some(score),
+            priority: 0,
+            node_origin: Some(self.vvtv_config.system.node_name.clone()),
+            content_kind: Some(plan.kind.clone()),
+        };
+        self.queue_store.enqueue(&item)?;
+        Ok(())
+    }
+
+    async fn cleanup_staging(&self, staging: &StagingPaths) -> ProcessorResult<()> {
+        if let Err(err) = fs::remove_dir_all(&staging.root).await {
+            warn!(path = %staging.root.display(), error = %err, "failed to clean staging directory");
+        }
+        Ok(())
+    }
+
+    async fn retry_operation<F, Fut, T>(&self, label: &str, mut operation: F) -> ProcessorResult<T>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = ProcessorResult<T>>,
+    {
+        let attempts = self.retry_policy.attempts.max(1);
+        for attempt in 0..attempts {
+            match operation().await {
+                Ok(value) => return Ok(value),
+                Err(err) if attempt + 1 == attempts => {
+                    self.log_failure(label, &err);
+                    return Err(err);
+                }
+                Err(err) => {
+                    let delay = self.retry_policy.compute_delay(attempt);
+                    let capped = delay.min(self.retry_sleep_cap);
+                    warn!(attempt = attempt + 1, wait = ?capped, stage = label, error = %err, "retrying operation");
+                    if !capped.is_zero() {
+                        sleep(capped).await;
+                    }
+                }
+            }
+        }
+        Err(ProcessorError::Download(format!(
+            "operation {label} exhausted retries"
+        )))
+    }
+
+    fn ready_directory(&self, plan_id: &str) -> PathBuf {
+        Path::new(&self.vvtv_config.paths.storage_dir)
+            .join("ready")
+            .join(plan_id)
+    }
+
+    async fn fetch_text(&self, url: &str) -> ProcessorResult<String> {
+        if let Ok(parsed) = Url::parse(url) {
+            if parsed.scheme() == "file" {
+                let path = parsed
+                    .to_file_path()
+                    .map_err(|_| ProcessorError::Download("invalid file url".into()))?;
+                return fs::read_to_string(&path)
+                    .await
+                    .map_err(|source| ProcessorError::Io { path, source });
+            }
+        }
+        let response = self.http_client.get(url).send().await?.error_for_status()?;
+        Ok(response.text().await?)
+    }
+
+    async fn fetch_to_file(&self, url: &str, path: &Path) -> ProcessorResult<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|source| ProcessorError::Io {
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
+        }
+        if let Ok(parsed) = Url::parse(url) {
+            if parsed.scheme() == "file" {
+                let source_path = parsed
+                    .to_file_path()
+                    .map_err(|_| ProcessorError::Download("invalid file url".into()))?;
+                self.copy_file(&source_path, path).await?;
+                return Ok(());
+            }
+        }
+        let response = self.http_client.get(url).send().await?.error_for_status()?;
+        let mut stream = response.bytes_stream();
+        let mut file = fs::File::create(path)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        use futures::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let data = chunk?;
+            file.write_all(&data)
+                .await
+                .map_err(|source| ProcessorError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+        }
+        Ok(())
+    }
+
+    async fn copy_file(&self, from: &Path, to: &Path) -> ProcessorResult<()> {
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|source| ProcessorError::Io {
+                    path: parent.to_path_buf(),
+                    source,
+                })?;
+        }
+        fs::copy(from, to)
+            .await
+            .map(|_| ())
+            .map_err(|source| ProcessorError::Io {
+                path: to.to_path_buf(),
+                source,
+            })
+    }
+
+    fn resolve_segment_url(&self, base: &str, segment: &str) -> ProcessorResult<String> {
+        if let Ok(parsed) = Url::parse(segment) {
+            if matches!(parsed.scheme(), "file" | "http" | "https") {
+                return Ok(segment.to_string());
+            }
+        }
+        let base = Url::parse(base).map_err(|err| ProcessorError::Download(err.to_string()))?;
+        let joined = base
+            .join(segment)
+            .map_err(|err| ProcessorError::Download(err.to_string()))?;
+        Ok(joined.to_string())
+    }
+
+    async fn write_remux_stub(
+        &self,
+        path: &Path,
+        label: &str,
+        segments: &[SegmentRecord],
+    ) -> ProcessorResult<()> {
+        let mut file = fs::File::create(path)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        let mut buffer = format!("REMUX-STUB {label} segments={}\n", segments.len());
+        for segment in segments {
+            buffer.push_str(&format!(
+                "# {} {:.3}s {}\n",
+                segment.index, segment.duration, segment.original_uri
+            ));
+        }
+        file.write_all(buffer.as_bytes())
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        Ok(())
+    }
+
+    async fn transcode_media(
+        &self,
+        path: &Path,
+        downloaded: &DownloadedMedia,
+    ) -> ProcessorResult<()> {
+        let Some((input, work_dir)) = self.transcode_input(downloaded) else {
+            self.write_transcode_stub(path, downloaded, None).await?;
+            return Ok(());
+        };
+
+        let command = self.build_transcode_command(&input, path);
+        let command_display = command.display();
+        let mut process = command.create();
+        if let Some(dir) = work_dir {
+            process.current_dir(dir);
+        }
+        process.kill_on_drop(true);
+        match process.status().await {
+            Ok(status) if status.success() => {
+                info!("transcode completed with command: {command_display}");
+                Ok(())
+            }
+            Ok(status) => {
+                warn!("ffmpeg exited with status {status:?}; falling back to transcode stub");
+                self.write_transcode_stub(path, downloaded, Some(&command_display))
+                    .await?;
+                Ok(())
+            }
+            Err(err) => {
+                warn!("failed to execute ffmpeg: {err}; writing transcode stub");
+                self.write_transcode_stub(path, downloaded, Some(&command_display))
+                    .await?;
+                Ok(())
+            }
+        }
+    }
+
+    fn transcode_input(&self, downloaded: &DownloadedMedia) -> Option<(PathBuf, Option<PathBuf>)> {
+        match downloaded {
+            DownloadedMedia::Progressive(progressive) => {
+                Some((progressive.file_path.clone(), None))
+            }
+            DownloadedMedia::Hls(hls) => {
+                let dir = hls
+                    .rewritten_playlist
+                    .parent()
+                    .map(|path| path.to_path_buf());
+                Some((hls.rewritten_playlist.clone(), dir))
+            }
+            DownloadedMedia::Dash(dash) => {
+                let dir = dash.manifest_path.parent().map(|path| path.to_path_buf());
+                Some((dash.manifest_path.clone(), dir))
+            }
+        }
+    }
+
+    fn build_transcode_command(&self, input: &Path, output: &Path) -> TranscodeCommand {
+        let mut command = TranscodeCommand::new("ffmpeg");
+        command.arg("-y");
+        command.arg("-hide_banner");
+        command.arg("-loglevel");
+        command.arg("error");
+
+        if self.should_use_hardware_accel() {
+            command.arg("-hwaccel");
+            command.arg("videotoolbox");
+        }
+
+        command.arg("-i");
+        command.arg(input.as_os_str());
+
+        let transcode = &self.processor_config.transcode;
+        if self.should_use_hardware_accel() {
+            command.arg("-c:v");
+            command.arg("h264_videotoolbox");
+        } else {
+            command.arg("-c:v");
+            command.arg(OsStr::new(&transcode.codec));
+            command.arg("-preset");
+            command.arg(OsStr::new(&transcode.preset));
+            command.arg("-crf");
+            command.arg(transcode.crf.to_string());
+            command.arg("-profile:v");
+            command.arg(OsStr::new(&transcode.profile));
+            command.arg("-level:v");
+            command.arg(OsStr::new(&transcode.level));
+        }
+
+        command.arg("-pix_fmt");
+        command.arg(OsStr::new(&transcode.pix_fmt));
+        command.arg("-g");
+        command.arg(transcode.keyint.to_string());
+        command.arg("-keyint_min");
+        command.arg(transcode.min_keyint.to_string());
+        command.arg("-sc_threshold");
+        command.arg(transcode.scenecut.to_string());
+        command.arg("-maxrate");
+        command.arg(OsStr::new(&transcode.vbv_maxrate));
+        command.arg("-bufsize");
+        command.arg(OsStr::new(&transcode.vbv_bufsize));
+        command.arg("-threads");
+        command.arg("0");
+
+        let profiles = &self.processor_config.profiles;
+        command.arg("-c:a");
+        command.arg("aac");
+        command.arg("-b:a");
+        command.arg(OsStr::new(&profiles.hls_720p.audio_bitrate));
+
+        command.arg("-movflags");
+        command.arg("+faststart");
+        command.arg(output.as_os_str());
+        command
+    }
+
+    fn should_use_hardware_accel(&self) -> bool {
+        self.processor_config.transcode.use_hardware_accel && detect_apple_silicon()
+    }
+
+    async fn write_transcode_stub(
+        &self,
+        path: &Path,
+        downloaded: &DownloadedMedia,
+        command: Option<&str>,
+    ) -> ProcessorResult<()> {
+        let mut file = fs::File::create(path)
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        let mut descriptor = format!("TRANSCODE-STUB {:?}\n", downloaded);
+        descriptor.push_str(&format!(
+            "hardware_accel={}\n",
+            if self.should_use_hardware_accel() {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        ));
+        if let Some(command) = command {
+            descriptor.push_str(&format!("command={command}\n"));
+        }
+        file.write_all(descriptor.as_bytes())
+            .await
+            .map_err(|source| ProcessorError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        Ok(())
+    }
+
+    async fn write_loudnorm_stub(&self, master: &Path, normalized: &Path) -> ProcessorResult<()> {
+        self.copy_file(master, normalized).await?;
+        Ok(())
+    }
+
+    async fn emit_hls_variant(
+        &self,
+        ready_dir: &Path,
+        _source: &Path,
+        downloaded: &DownloadedMedia,
+        prefix: &str,
+    ) -> ProcessorResult<Vec<(f64, PathBuf)>> {
+        let mut results = Vec::new();
+        let mut index = 0usize;
+        match downloaded {
+            DownloadedMedia::Hls(hls) => {
+                for segment in &hls.segments {
+                    index += 1;
+                    let extension = segment.extension().unwrap_or_else(|| "m4s".into());
+                    let file_name = format!("{prefix}_{:04}.{}", index, extension);
+                    let dest = ready_dir.join(&file_name);
+                    self.copy_file(&segment.local_path, &dest).await?;
+                    results.push((segment.duration, dest));
+                }
+            }
+            DownloadedMedia::Dash(dash) => {
+                for segment in &dash.segments {
+                    index += 1;
+                    let extension = segment.extension().unwrap_or_else(|| "m4s".into());
+                    let file_name = format!("{prefix}_{:04}.{}", index, extension);
+                    let dest = ready_dir.join(&file_name);
+                    self.copy_file(&segment.local_path, &dest).await?;
+                    results.push((segment.duration, dest));
+                }
+            }
+            DownloadedMedia::Progressive(_) => {
+                let duration = self.estimate_duration_from_prefix(prefix);
+                for n in 0..3 {
+                    index += 1;
+                    let file_name = format!("{prefix}_{:04}.m4s", index);
+                    let dest = ready_dir.join(&file_name);
+                    let mut file =
+                        fs::File::create(&dest)
+                            .await
+                            .map_err(|source| ProcessorError::Io {
+                                path: dest.clone(),
+                                source,
+                            })?;
+                    let contents = format!("VARIANT-STUB prefix={prefix} segment={n}\n");
+                    file.write_all(contents.as_bytes())
+                        .await
+                        .map_err(|source| ProcessorError::Io {
+                            path: dest.clone(),
+                            source,
+                        })?;
+                    results.push((duration, dest));
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    fn build_variant_playlist(&self, segments: &[(f64, PathBuf)]) -> String {
+        let mut playlist = String::new();
+        playlist.push_str("#EXTM3U\n");
+        playlist.push_str("#EXT-X-VERSION:7\n");
+        let target = segments
+            .iter()
+            .map(|(duration, _)| duration.ceil() as u32)
+            .max()
+            .unwrap_or(4);
+        playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", target));
+        playlist.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
+        playlist.push_str("#EXT-X-MEDIA-SEQUENCE:0\n");
+        for (duration, path) in segments {
+            let file_name = path.file_name().unwrap().to_string_lossy();
+            playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
+            playlist.push_str(&format!("{}\n", file_name));
+        }
+        playlist.push_str("#EXT-X-ENDLIST\n");
+        playlist
+    }
+
+    async fn compute_sha256(&self, path: &Path) -> ProcessorResult<String> {
+        let bytes = fs::read(path).await.map_err(|source| ProcessorError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        Ok(hex_encode(hasher.finalize()))
+    }
+
+    fn estimate_duration_from_prefix(&self, prefix: &str) -> f64 {
+        match prefix {
+            HLS_SEGMENT_PREFIX_720 => 4.0,
+            HLS_SEGMENT_PREFIX_480 => 6.0,
+            _ => 5.0,
+        }
+    }
+
+    fn log_failure(&self, stage: &str, error: &ProcessorError) {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log_path)
+        {
+            let _ = writeln!(file, "{} [{}] {}", Utc::now().to_rfc3339(), stage, error);
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HlsPlaylist {
+    version: u32,
+    target_duration: f64,
+    media_sequence: u64,
+    segments: Vec<HlsSegment>,
+}
+
+#[derive(Debug, Clone)]
+struct TranscodeCommand {
+    program: OsString,
+    args: Vec<OsString>,
+}
+
+impl TranscodeCommand {
+    fn new(program: impl AsRef<OsStr>) -> Self {
+        Self {
+            program: program.as_ref().to_owned(),
+            args: Vec::new(),
+        }
+    }
+
+    fn arg(&mut self, value: impl AsRef<OsStr>) -> &mut Self {
+        self.args.push(value.as_ref().to_owned());
+        self
+    }
+
+    fn create(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(self.args.iter().map(|arg| arg.as_os_str()));
+        command
+    }
+
+    fn display(&self) -> String {
+        let program = self.program.to_string_lossy();
+        let joined = self
+            .args
+            .iter()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if joined.is_empty() {
+            program.into_owned()
+        } else {
+            format!("{program} {joined}")
+        }
+    }
+}
+
+fn detect_apple_silicon() -> bool {
+    if env::var_os("VVTV_FORCE_APPLE_SILICON").is_some() {
+        return true;
+    }
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    {
+        true
+    }
+    #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
+    {
+        false
+    }
+}
+
+#[derive(Debug, Clone)]
+struct HlsSegment {
+    duration: f64,
+    uri: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detect_apple_silicon;
+
+    #[test]
+    fn detect_apple_silicon_respects_override() {
+        std::env::set_var("VVTV_FORCE_APPLE_SILICON", "1");
+        assert!(detect_apple_silicon());
+        std::env::remove_var("VVTV_FORCE_APPLE_SILICON");
+    }
+
+    #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
+    #[test]
+    fn detect_apple_silicon_false_on_non_mac() {
+        std::env::remove_var("VVTV_FORCE_APPLE_SILICON");
+        assert!(!detect_apple_silicon());
+    }
+}
+
+impl HlsPlaylist {
+    fn parse(contents: &str) -> Result<Self, String> {
+        if !contents.trim_start().starts_with("#EXTM3U") {
+            return Err("missing #EXTM3U header".into());
+        }
+        let mut version = 3u32;
+        let mut target_duration = 4.0f64;
+        let mut media_sequence = 0u64;
+        let mut segments = Vec::new();
+        let mut pending_duration: Option<f64> = None;
+        for line in contents.lines().map(|line| line.trim()) {
+            if line.starts_with("#EXT-X-VERSION:") {
+                version = line[15..].parse().map_err(|_| "invalid EXT-X-VERSION")?;
+            } else if line.starts_with("#EXT-X-TARGETDURATION:") {
+                target_duration = line[22..]
+                    .parse()
+                    .map_err(|_| "invalid EXT-X-TARGETDURATION")?;
+            } else if line.starts_with("#EXT-X-MEDIA-SEQUENCE:") {
+                media_sequence = line[22..]
+                    .parse()
+                    .map_err(|_| "invalid EXT-X-MEDIA-SEQUENCE")?;
+            } else if line.starts_with("#EXTINF:") {
+                let value = line[8..]
+                    .trim_end_matches(',')
+                    .parse()
+                    .map_err(|_| "invalid EXTINF duration")?;
+                pending_duration = Some(value);
+            } else if line.starts_with('#') || line.is_empty() {
+                continue;
+            } else if let Some(duration) = pending_duration.take() {
+                segments.push(HlsSegment {
+                    duration,
+                    uri: line.to_string(),
+                });
+            }
+        }
+        if segments.is_empty() {
+            return Err("playlist missing segments".into());
+        }
+        Ok(Self {
+            version,
+            target_duration,
+            media_sequence,
+            segments,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DashSegment {
+    duration: f64,
+    uri: String,
+}
+
+struct DashManifest;
+
+impl DashManifest {
+    fn parse(contents: &str) -> Result<Vec<DashSegment>, String> {
+        let mut segments = Vec::new();
+        let regex =
+            regex::Regex::new("SegmentURL\\s+media=\"([^\\\"]+)\"(?:\\s+duration=\"([^\\\"]+)\")?")
+                .map_err(|err| err.to_string())?;
+        for capture in regex.captures_iter(contents) {
+            let uri = capture
+                .get(1)
+                .ok_or_else(|| "missing media attribute".to_string())?
+                .as_str()
+                .to_string();
+            let duration = capture
+                .get(2)
+                .map(|m| m.as_str().parse().unwrap_or(4.0))
+                .unwrap_or(4.0);
+            segments.push(DashSegment { duration, uri });
+        }
+        if segments.is_empty() {
+            return Err("no SegmentURL entries found".into());
+        }
+        Ok(segments)
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct Manifest {
+    plan_id: String,
+    source: String,
+    capture_kind: String,
+    resolution: String,
+    strategy: MasteringStrategy,
+    duration: Option<f64>,
+    playlists: Vec<String>,
+    created_at: chrono::DateTime<Utc>,
+    quality: ManifestQuality,
+}
+
+#[derive(Debug, Serialize)]
+struct ManifestQuality {
+    pre: ManifestPre,
+    mid: ManifestMid,
+    signature: ManifestSignature,
+    warnings: Vec<String>,
+    actions: Vec<QualityAction>,
+    qc_warning: bool,
+}
+
+impl ManifestQuality {
+    fn from_report(report: &QualityReport, frame_path: &Path, ready_dir: &Path) -> Self {
+        let signature_frame = frame_path
+            .strip_prefix(ready_dir)
+            .ok()
+            .and_then(|path| path.to_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| frame_path.to_string_lossy().to_string());
+        Self {
+            pre: ManifestPre {
+                width: report.pre.width,
+                height: report.pre.height,
+                fps: report.pre.fps,
+                bitrate_kbps: report.pre.bitrate_kbps,
+                duration_seconds: report.pre.duration_seconds,
+                keyframe_interval: report.pre.keyframe_interval,
+                keyframe_estimated: report.pre.keyframe_estimated,
+            },
+            mid: ManifestMid {
+                vmaf_score: report.mid.vmaf_score,
+                ssim_score: report.mid.ssim_score,
+                black_ratio: report.mid.black_ratio,
+                audio_peak_db: report.mid.audio_peak_db,
+                noise_floor_db: report.mid.noise_floor_db,
+                freeze_score: report.mid.freeze_score,
+            },
+            signature: ManifestSignature {
+                palette: report.signature.palette.clone(),
+                average_color: report.signature.average_color.clone(),
+                average_temperature: report.signature.average_temperature,
+                average_saturation: report.signature.average_saturation,
+                signature_deviation: report.signature.signature_deviation,
+                filters: report.signature.filters_applied.clone(),
+                placeholder_frame: report.signature.placeholder_frame,
+                capture: signature_frame,
+            },
+            warnings: report.warnings.clone(),
+            actions: report.actions.clone(),
+            qc_warning: report.qc_warning,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ManifestPre {
+    width: u32,
+    height: u32,
+    fps: f64,
+    bitrate_kbps: u32,
+    duration_seconds: f64,
+    keyframe_interval: f64,
+    keyframe_estimated: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ManifestMid {
+    vmaf_score: f64,
+    ssim_score: f64,
+    black_ratio: f64,
+    audio_peak_db: f64,
+    noise_floor_db: f64,
+    freeze_score: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct ManifestSignature {
+    palette: Vec<String>,
+    average_color: String,
+    average_temperature: f32,
+    average_saturation: f32,
+    signature_deviation: f64,
+    filters: SignatureFilters,
+    placeholder_frame: bool,
+    capture: String,
+}

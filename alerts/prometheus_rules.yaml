@@ -1,0 +1,292 @@
+# VVTV Prometheus Alerting Rules
+# Defines alerts for all VVTV services with proper severity and runbook links
+
+groups:
+  - name: vvtv_streaming
+    rules:
+      - alert: StreamSegmentAgeHigh
+        expr: stream_segment_age_seconds > 10
+        for: 2m
+        labels:
+          severity: critical
+          service: streaming
+          team: sre
+        annotations:
+          summary: "HLS segments are too old ({{ $value }}s)"
+          description: "Stream segment age is {{ $value }} seconds, exceeding 10s threshold for 2 minutes"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_streaming.md#segment-age"
+          dashboard_url: "https://grafana.vvtv.local/d/streaming/streaming-health"
+
+      - alert: StreamSegmentAgeWarning
+        expr: stream_segment_age_seconds > 8
+        for: 5m
+        labels:
+          severity: warning
+          service: streaming
+          team: sre
+        annotations:
+          summary: "HLS segments approaching age limit ({{ $value }}s)"
+          description: "Stream segment age is {{ $value }} seconds, approaching 10s limit"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_streaming.md#segment-age"
+
+      - alert: EncoderDropRateHigh
+        expr: rate(stream_encoder_drops_total[5m]) > 0.005
+        for: 10m
+        labels:
+          severity: major
+          service: streaming
+          team: sre
+        annotations:
+          summary: "High encoder drop rate ({{ $value | humanizePercentage }})"
+          description: "Encoder is dropping {{ $value | humanizePercentage }} of frames for 10 minutes"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_streaming.md#encoder-drops"
+
+      - alert: StreamIngestDown
+        expr: stream_ingest_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: streaming
+          team: sre
+        annotations:
+          summary: "RTMP ingest is down"
+          description: "RTMP ingest endpoint is not responding"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_streaming.md#ingest-down"
+
+      - alert: StreamBitrateVarianceHigh
+        expr: (stddev_over_time(stream_bitrate_mbps[15m]) / avg_over_time(stream_bitrate_mbps[15m])) > 0.25
+        for: 15m
+        labels:
+          severity: major
+          service: streaming
+          team: sre
+        annotations:
+          summary: "High stream bitrate variance ({{ $value | humanizePercentage }})"
+          description: "Stream bitrate variance is {{ $value | humanizePercentage }}, exceeding 25% threshold"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_streaming.md#bitrate-variance"
+
+  - name: vvtv_llm_pool
+    rules:
+      - alert: LLMPoolHighLatency
+        expr: histogram_quantile(0.95, rate(llmpool_infer_duration_ms_bucket[5m])) > 1500
+        for: 10m
+        labels:
+          severity: major
+          service: llm_pool
+          team: ai
+        annotations:
+          summary: "LLM Pool high latency ({{ $value }}ms p95)"
+          description: "LLM inference p95 latency is {{ $value }}ms, exceeding 1500ms threshold"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_pool.md#high-latency"
+
+      - alert: LLMPoolCriticalLatency
+        expr: histogram_quantile(0.95, rate(llmpool_infer_duration_ms_bucket[5m])) > 2000
+        for: 5m
+        labels:
+          severity: critical
+          service: llm_pool
+          team: ai
+        annotations:
+          summary: "LLM Pool critical latency ({{ $value }}ms p95)"
+          description: "LLM inference p95 latency is {{ $value }}ms, exceeding 2000ms critical threshold"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_pool.md#high-latency"
+
+      - alert: LLMPoolHighErrorRate
+        expr: (rate(llmpool_infer_total{status!="success"}[5m]) / rate(llmpool_infer_total[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: major
+          service: llm_pool
+          team: ai
+        annotations:
+          summary: "LLM Pool high error rate ({{ $value | humanizePercentage }})"
+          description: "LLM inference error rate is {{ $value | humanizePercentage }}, exceeding 1% threshold"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_pool.md#high-error-rate"
+
+      - alert: LLMPoolNoProviders
+        expr: count(llmpool_provider_up == 1) == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: llm_pool
+          team: ai
+        annotations:
+          summary: "No LLM providers available"
+          description: "All LLM providers are down or unavailable"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_pool.md#no-providers"
+
+      - alert: LLMPoolCircuitBreakerOpen
+        expr: llmpool_circuit_breaker_open > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: llm_pool
+          team: ai
+        annotations:
+          summary: "LLM Pool circuit breaker open"
+          description: "Circuit breaker for {{ $labels.provider }} has been open for 15 minutes"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_pool.md#circuit-breaker"
+
+  - name: vvtv_api
+    rules:
+      - alert: APIHighErrorRate
+        expr: (rate(api_http_requests_total{code=~"5.."}[5m]) / rate(api_http_requests_total[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: major
+          service: api
+          team: sre
+        annotations:
+          summary: "Public API high error rate ({{ $value | humanizePercentage }})"
+          description: "API 5xx error rate is {{ $value | humanizePercentage }}, exceeding 1% threshold"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_api.md#high-error-rate"
+
+      - alert: APIHighLatency
+        expr: histogram_quantile(0.95, rate(api_http_duration_ms_bucket[5m])) > 1500
+        for: 10m
+        labels:
+          severity: major
+          service: api
+          team: sre
+        annotations:
+          summary: "Public API high latency ({{ $value }}ms p95)"
+          description: "API p95 latency is {{ $value }}ms, exceeding 1500ms threshold"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_api.md#high-latency"
+
+      - alert: APIRateLimitingHigh
+        expr: rate(api_rate_limited_total[5m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+          service: api
+          team: sre
+        annotations:
+          summary: "High API rate limiting activity"
+          description: "API rate limiting {{ $value }} requests/second for 10 minutes"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_api.md#rate-limiting"
+
+  - name: vvtv_planner
+    rules:
+      - alert: PlannerHighLatency
+        expr: histogram_quantile(0.95, rate(planner_cycle_duration_ms_bucket[5m])) > 500
+        for: 10m
+        labels:
+          severity: major
+          service: planner
+          team: sre
+        annotations:
+          summary: "Planner high cycle latency ({{ $value }}ms p95)"
+          description: "Planner selection cycle p95 is {{ $value }}ms, exceeding 500ms threshold"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_planner.md#high-latency"
+
+      - alert: QueueStarvation
+        expr: queue_buffer_duration_minutes < 30
+        for: 2m
+        labels:
+          severity: critical
+          service: planner
+          team: sre
+        annotations:
+          summary: "Queue buffer critically low ({{ $value }} minutes)"
+          description: "Queue buffer is {{ $value }} minutes, below 30 minute threshold"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_planner.md#queue-starvation"
+
+      - alert: QueueBufferLow
+        expr: queue_buffer_duration_minutes < 60
+        for: 10m
+        labels:
+          severity: warning
+          service: planner
+          team: sre
+        annotations:
+          summary: "Queue buffer low ({{ $value }} minutes)"
+          description: "Queue buffer is {{ $value }} minutes, below 60 minute recommended threshold"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_planner.md#low-buffer"
+
+  - name: vvtv_system
+    rules:
+      - alert: HighCPUUsage
+        expr: (100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+        for: 15m
+        labels:
+          severity: warning
+          service: system
+          team: sre
+        annotations:
+          summary: "High CPU usage ({{ $value }}%)"
+          description: "CPU usage is {{ $value }}% for 15 minutes"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_system.md#high-cpu"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+          team: sre
+        annotations:
+          summary: "High memory usage ({{ $value | humanizePercentage }})"
+          description: "Memory usage is {{ $value | humanizePercentage }} for 10 minutes"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_system.md#high-memory"
+
+      - alert: DiskSpaceLow
+        expr: (1 - (node_filesystem_avail_bytes{mountpoint="/vvtv"} / node_filesystem_size_bytes{mountpoint="/vvtv"})) > 0.85
+        for: 5m
+        labels:
+          severity: major
+          service: system
+          team: sre
+        annotations:
+          summary: "Low disk space ({{ $value | humanizePercentage }} used)"
+          description: "/vvtv filesystem is {{ $value | humanizePercentage }} full"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_system.md#low-disk-space"
+
+      - alert: DiskSpaceCritical
+        expr: (1 - (node_filesystem_avail_bytes{mountpoint="/vvtv"} / node_filesystem_size_bytes{mountpoint="/vvtv"})) > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          service: system
+          team: sre
+        annotations:
+          summary: "Critical disk space ({{ $value | humanizePercentage }} used)"
+          description: "/vvtv filesystem is {{ $value | humanizePercentage }} full - immediate action required"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_system.md#critical-disk-space"
+
+  - name: vvtv_business_logic
+    rules:
+      - alert: BusinessLogicValidationFailed
+        expr: increase(business_logic_validation_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: major
+          service: business_logic
+          team: sre
+        annotations:
+          summary: "Business logic validation failed"
+          description: "Business logic configuration validation has failed"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_business_logic.md#validation-failed"
+
+      - alert: AutopilotRollback
+        expr: increase(autopilot_rollbacks_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: autopilot
+          team: sre
+        annotations:
+          summary: "Autopilot performed rollback"
+          description: "Autopilot system performed {{ $value }} rollbacks in the last hour"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_autopilot.md#rollback"
+
+      - alert: CuratorHighInterventionRate
+        expr: rate(curator_interventions_total[1h]) > 0.2
+        for: 1h
+        labels:
+          severity: warning
+          service: curator
+          team: sre
+        annotations:
+          summary: "High curator intervention rate"
+          description: "Curator is intervening at {{ $value }} interventions/hour, may indicate configuration issues"
+          runbook_url: "https://ops.vvtv.local/runbooks/rb_curator.md#high-intervention-rate"

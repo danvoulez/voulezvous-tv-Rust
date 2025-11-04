@@ -1,0 +1,115 @@
+# VVTV Feature Flags Configuration
+# Runtime toggles for system behavior
+
+[curator]
+# Curator Vigilante system controls
+apply_enabled = true                    # Enable curator interventions
+min_confidence_apply = 0.62            # Minimum confidence for apply mode
+token_bucket_capacity = 5              # Max interventions stored
+token_bucket_refill_rate = 2           # Interventions per hour
+
+[autopilot]
+# Autopilot adaptive system controls
+enabled = false                        # Enable autopilot adjustments
+canary_pct = 0.2                      # Percentage for canary deployments
+max_daily_variation = 0.05            # Maximum daily parameter change
+learning_rate = 0.01                  # How fast to adapt
+stability_threshold = 0.9             # Minimum stability before changes
+
+[llm_integration]
+# LLM service integration controls
+enabled = true                        # Enable LLM integration
+content_analysis_enabled = true       # Enable content analysis
+query_enhancement_enabled = true      # Enable query enhancement
+curation_hints_enabled = true         # Enable curation hints
+max_budget_eur_per_hour = 0.05       # Hourly spending limit
+circuit_breaker_threshold = 0.2      # Failure rate to trip breaker
+timeout_seconds = 3                   # Request timeout
+
+[business_logic]
+# Business logic system controls
+hot_reload_enabled = true             # Enable hot config reload
+validation_strict = true              # Strict validation mode
+audit_all_changes = true              # Log all configuration changes
+rollback_on_error = true              # Auto-rollback on validation errors
+
+[streaming]
+# Streaming and broadcast controls
+emergency_loop_enabled = true         # Enable emergency content loop
+auto_quality_adjustment = true        # Auto-adjust quality based on performance
+segment_cleanup_enabled = true        # Auto-cleanup old HLS segments
+bitrate_adaptation_enabled = false    # Adaptive bitrate (experimental)
+
+[api]
+# Public API controls
+rate_limiting_enabled = true          # Enable rate limiting
+authentication_required = true        # Require authentication
+cors_enabled = false                  # Enable CORS headers
+request_logging_detailed = true       # Detailed request logging
+
+[discovery]
+# Content discovery controls
+browser_automation_enabled = true     # Enable browser automation
+play_before_download = true           # Enable PBD verification
+anti_detection_enabled = true         # Enable anti-bot measures
+parallel_sessions = 2                 # Max parallel browser sessions
+
+[quality_control]
+# Quality control system
+vmaf_analysis_enabled = true          # Enable VMAF quality analysis
+audio_normalization_enabled = true   # Enable EBU R128 normalization
+visual_consistency_check = true       # Enable visual consistency checks
+automatic_rejection_enabled = false   # Auto-reject low quality content
+
+[monitoring]
+# Monitoring and observability
+metrics_collection_enabled = true     # Enable metrics collection
+detailed_logging = false              # Enable detailed debug logging
+performance_profiling = false         # Enable performance profiling
+health_checks_enabled = true          # Enable health check endpoints
+
+[security]
+# Security controls
+signature_verification = true         # Verify cryptographic signatures
+key_rotation_enabled = true           # Enable automatic key rotation
+audit_logging_enabled = true          # Enable security audit logging
+intrusion_detection = false           # Enable intrusion detection (experimental)
+
+[experimental]
+# Experimental features (use with caution)
+ai_powered_scheduling = false          # AI-powered content scheduling
+predictive_caching = false            # Predictive content caching
+advanced_analytics = false            # Advanced audience analytics
+multi_region_sync = false             # Multi-region synchronization
+
+# Feature flag metadata
+[metadata]
+last_updated = "2025-10-22T12:00:00Z"
+updated_by = "system_admin"
+version = "1.0.0"
+environment = "production"
+
+# Flag change history (last 10 changes)
+[[history]]
+timestamp = "2025-10-22T12:00:00Z"
+flag = "autopilot.enabled"
+old_value = true
+new_value = false
+changed_by = "sre_oncall"
+reason = "Stability concerns during high traffic"
+
+[[history]]
+timestamp = "2025-10-22T11:30:00Z"
+flag = "streaming.bitrate_adaptation_enabled"
+old_value = true
+new_value = false
+changed_by = "streaming_team"
+reason = "Causing quality issues"
+
+[[history]]
+timestamp = "2025-10-22T10:15:00Z"
+flag = "llm_integration.max_budget_eur_per_hour"
+old_value = 0.10
+new_value = 0.05
+changed_by = "finance_team"
+reason = "Cost optimization"

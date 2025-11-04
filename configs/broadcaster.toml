@@ -1,0 +1,35 @@
+# VVTV Broadcaster Configuration
+
+[queue]
+policy = "fifo_with_bump"
+music_ratio = 0.1
+curation_bump_threshold = 0.85
+
+[rtmp]
+origin = "rtmp://localhost/live/main"
+chunk_size = 4096
+reconnect_attempts = 5
+reconnect_delay_ms = 3000
+
+[hls]
+output_path = "/vvtv/broadcast/hls"
+segment_duration = 4
+playlist_length = "48m"
+segment_type = "fmp4"
+flags = ["independent_segments"]
+
+[failover]
+enabled = true
+standby_encoder = true
+detection_timeout_seconds = 3
+emergency_loop_hours = 2
+
+[watchdog]
+interval_seconds = 30
+restart_on_freeze = true
+restart_max_attempts = 3
+
+[ffmpeg]
+log_level = "error"
+stats_period = "60"
+thread_queue_size = 512

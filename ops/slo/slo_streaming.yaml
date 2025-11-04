@@ -1,0 +1,85 @@
+# VVTV Streaming Service Level Objectives
+# Defines SLOs for the streaming/broadcast components
+
+service: streaming
+owner: sre-team
+description: "Live streaming and broadcast pipeline SLOs"
+
+slos:
+  - name: segment_freshness
+    description: "HLS segments should be fresh (low latency)"
+    sli: segment_age_seconds
+    target: 6.0  # seconds
+    window: 7d
+    error_budget: 0.5  # 0.5% of time windows can exceed target
+    alerting:
+      warning_threshold: 8.0
+      critical_threshold: 10.0
+      duration: 2m
+    dashboard: "streaming_health"
+    runbook: "ops/runbooks/rb_streaming.md#segment-age"
+
+  - name: encoder_stability
+    description: "Video encoder should not drop frames"
+    sli: encoder_drops_rate
+    target: 0.001  # 0.1%
+    window: 7d
+    error_budget: 0.2  # 0.2% error budget
+    alerting:
+      warning_threshold: 0.002  # 0.2%
+      critical_threshold: 0.005  # 0.5%
+      duration: 10m
+    dashboard: "streaming_health"
+    runbook: "ops/runbooks/rb_streaming.md#encoder-drops"
+
+  - name: ingest_availability
+    description: "RTMP ingest should be available"
+    sli: ingest_uptime_rate
+    target: 0.999  # 99.9%
+    window: 30d
+    error_budget: 0.1  # 0.1% downtime allowed
+    alerting:
+      critical_threshold: 0.995  # 99.5%
+      duration: 5m
+    dashboard: "streaming_health"
+    runbook: "ops/runbooks/rb_streaming.md#ingest-down"
+
+  - name: stream_bitrate_stability
+    description: "Stream bitrate should be stable"
+    sli: bitrate_variance_coefficient
+    target: 0.1  # 10% coefficient of variation
+    window: 1h
+    error_budget: 5.0  # 5% of hours can exceed target
+    alerting:
+      warning_threshold: 0.15
+      critical_threshold: 0.25
+      duration: 15m
+    dashboard: "streaming_health"
+    runbook: "ops/runbooks/rb_streaming.md#bitrate-variance"
+
+metrics:
+  - name: segment_age_seconds
+    query: 'time() - stream_last_segment_timestamp'
+    unit: seconds
+    
+  - name: encoder_drops_rate
+    query: 'rate(stream_encoder_drops_total[5m])'
+    unit: ratio
+    
+  - name: ingest_uptime_rate
+    query: 'avg_over_time(stream_ingest_up[1h])'
+    unit: ratio
+    
+  - name: bitrate_variance_coefficient
+    query: 'stddev_over_time(stream_bitrate_mbps[1h]) / avg_over_time(stream_bitrate_mbps[1h])'
+    unit: ratio
+
+dependencies:
+  - nginx-rtmp
+  - ffmpeg
+  - storage_system
+
+contacts:
+  primary: sre-oncall@vvtv.local
+  secondary: streaming-team@vvtv.local
+  escalation: engineering-lead@vvtv.local

@@ -1,0 +1,101 @@
+# VVTV LLM Pool Service Level Objectives
+# Defines SLOs for the LLM inference pool
+
+service: llm_pool
+owner: ai-team
+description: "LLM Pool inference performance and reliability SLOs"
+
+slos:
+  - name: inference_latency
+    description: "LLM inference should complete within acceptable time"
+    sli: infer_duration_p95_ms
+    target: 1200  # 1.2 seconds
+    window: 7d
+    error_budget: 1.0  # 1% of requests can exceed target
+    alerting:
+      warning_threshold: 1500  # 1.5s
+      critical_threshold: 2000  # 2.0s
+      duration: 10m
+    dashboard: "llm_pool"
+    runbook: "ops/runbooks/rb_pool.md#high-latency"
+
+  - name: inference_success_rate
+    description: "LLM inference should succeed reliably"
+    sli: infer_success_rate
+    target: 0.995  # 99.5%
+    window: 7d
+    error_budget: 0.5  # 0.5% error budget
+    alerting:
+      warning_threshold: 0.99   # 99%
+      critical_threshold: 0.985 # 98.5%
+      duration: 5m
+    dashboard: "llm_pool"
+    runbook: "ops/runbooks/rb_pool.md#high-error-rate"
+
+  - name: provider_availability
+    description: "At least one LLM provider should be available"
+    sli: available_providers_count
+    target: 1  # minimum 1 provider
+    window: 24h
+    error_budget: 0  # zero tolerance
+    alerting:
+      critical_threshold: 0
+      duration: 1m
+    dashboard: "llm_pool"
+    runbook: "ops/runbooks/rb_pool.md#no-providers"
+
+  - name: cache_efficiency
+    description: "Cache should provide reasonable hit rate"
+    sli: cache_hit_rate
+    target: 0.3  # 30% hit rate
+    window: 24h
+    error_budget: 20.0  # 20% of time can be below target
+    alerting:
+      warning_threshold: 0.2  # 20%
+      duration: 1h
+    dashboard: "llm_pool"
+    runbook: "ops/runbooks/rb_pool.md#low-cache-hit"
+
+  - name: circuit_breaker_health
+    description: "Circuit breakers should not be constantly open"
+    sli: circuit_breaker_open_rate
+    target: 0.05  # 5% of time
+    window: 1h
+    error_budget: 10.0  # 10% of hours can exceed target
+    alerting:
+      warning_threshold: 0.1   # 10%
+      critical_threshold: 0.2  # 20%
+      duration: 15m
+    dashboard: "llm_pool"
+    runbook: "ops/runbooks/rb_pool.md#circuit-breaker"
+
+metrics:
+  - name: infer_duration_p95_ms
+    query: 'histogram_quantile(0.95, rate(llmpool_infer_duration_ms_bucket[5m])) * 1000'
+    unit: milliseconds
+    
+  - name: infer_success_rate
+    query: 'rate(llmpool_infer_total{status="success"}[5m]) / rate(llmpool_infer_total[5m])'
+    unit: ratio
+    
+  - name: available_providers_count
+    query: 'count(llmpool_provider_up == 1)'
+    unit: count
+    
+  - name: cache_hit_rate
+    query: 'rate(llmpool_cache_hits_total[5m]) / rate(llmpool_cache_requests_total[5m])'
+    unit: ratio
+    
+  - name: circuit_breaker_open_rate
+    query: 'avg_over_time(llmpool_circuit_breaker_open[1h])'
+    unit: ratio
+
+dependencies:
+  - ollama
+  - redis_cache
+  - model_storage
+
+contacts:
+  primary: ai-oncall@vvtv.local
+  secondary: sre-oncall@vvtv.local
+  escalation: ai-lead@vvtv.local

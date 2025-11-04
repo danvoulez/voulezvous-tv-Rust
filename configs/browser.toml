@@ -1,0 +1,126 @@
+# VVTV Browser Automation Configuration
+
+[chromium]
+executable_path = "/usr/bin/chromium"
+headless = true
+sandbox = true
+disable_gpu = true
+
+# Performance
+max_memory_mb = 2048
+max_tabs_per_instance = 2
+tab_timeout_seconds = 300
+
+[flags]
+# Anti-detection
+no_first_run = true
+disable_automation_controlled = true
+disable_blink_features = ["AutomationControlled"]
+mute_audio = true
+autoplay_policy = "no-user-gesture-required"
+
+# Language
+lang = "en-US"
+accept_language = "en-US,en;q=0.9"
+
+[user_agents]
+# Rotativo
+pool = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+]
+rotation_frequency = 12
+
+[viewport]
+# Resoluções humanas comuns
+resolutions = [
+    [1366, 768],
+    [1440, 900],
+    [1536, 864],
+    [1920, 1080]
+]
+jitter_pixels = 16
+device_scale_factor = [1.0, 2.0]
+
+[human_simulation]
+# Mouse (Bézier curves)
+mouse_speed_min_px_s = 500
+mouse_speed_max_px_s = 1200
+mouse_jitter_px = 3
+click_hesitation_ms = [120, 450]
+click_duration_ms = [30, 70]
+
+# Scroll
+scroll_burst_px = [200, 800]
+scroll_pause_ms = [120, 300]
+scroll_near_player_slow = true
+
+# Keyboard
+typing_cadence_cpm = [140, 220]
+typing_jitter_ms = [15, 35]
+error_frequency_chars = [80, 130]
+
+# Timing
+idle_duration_ms = [1500, 4500]
+ociosidade_frequency = [20000, 35000]
+
+[pbd]
+# Play-Before-Download
+enabled = true
+force_hd = true
+hd_priority = ["1080p", "720p"]
+playback_wait_seconds = [5, 12]
+validation_buffer_seconds = 3
+
+[selectors]
+# Player detection
+video_element = "video"
+play_buttons = [".play", ".vjs-play-control", "button[aria-label*='Play']"]
+quality_menu = [".quality", ".settings", ".vjs-menu-button"]
+
+# Consent/popups
+consent_buttons = ["button:contains('Accept')", ".cookie-accept", "#consent-accept"]
+
+[proxy]
+enabled = true
+type = "residential"
+rotation_pages = 30
+timeout_seconds = 10
+
+[sources]
+# Whitelisted domains (license verified)
+whitelist = []
+blacklist = []
+
+[fingerprint]
+enable_canvas_noise = true
+enable_webgl_mask = true
+enable_audio_mask = true
+canvas_noise_range = [-3, 3]
+audio_noise = 0.0001
+webgl_vendor = "Intel Inc."
+webgl_renderer = "Intel Iris OpenGL Engine"
+
+[retry]
+max_attempts = 3
+schedule_minutes = [10, 45, 1440]
+jitter_seconds = 30
+
+[ip_rotation]
+enabled = true
+tailscale_binary = "tailscale"
+exit_nodes = ["fra.exit.ts.net", "nyc.exit.ts.net"]
+cooldown_seconds = 10
+
+[observability]
+failure_log = "logs/curator_failures.log"
+metrics_db = "data/metrics.sqlite"
+
+[discovery]
+search_engine = "google"
+search_delay_ms = [2000, 5000]
+scroll_iterations = 3
+max_results_per_search = 20
+candidate_delay_ms = [8000, 15000]
+filter_domains = ["youtube.com", "vimeo.com", "dailymotion.com"]

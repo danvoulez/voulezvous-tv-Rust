@@ -451,21 +451,7 @@ pub struct ProgressionRecommendation {
     pub estimated_time_minutes: u32,
 }
 
-/// Types of progression recommendations
-#[derive(Debug, Clone, Serialize)]
-pub enum RecommendationType {
-    WaitForSamples,
-    ReadyForAnalysis,
-    ExtendMonitoring,
-    ConsiderRollback,
-    TimeoutWarning,
-    ManualReview,
-    ReduceDuration,
-    ExtendDuration,
-    ParameterAdjustment,
-    QualityReview,
-    InfrastructureReview,
-}
+/// Types of progression recommendations (full definition below at line 553)
 
 /// Priority levels for recommendations
 #[derive(Debug, Clone, Serialize)]
@@ -2270,6 +2256,9 @@ impl CanaryDeployment {
         // Generate failure pattern
         let failure_pattern = self.identify_failure_pattern(&failure_categories, deployment);
 
+        // Calculate severity before moving root_causes
+        let severity = self.calculate_failure_severity(&root_causes);
+
         Ok(FailureAnalysis {
             deployment_id: deployment_id.to_string(),
             failure_timestamp: deployment.decision.as_ref().map(|d| d.decision_timestamp).unwrap_or(Utc::now()),
@@ -2279,7 +2268,7 @@ impl CanaryDeployment {
             parameter_changes: deployment.parameter_changes.clone(),
             metrics_summary: deployment.metrics_summary.clone(),
             recommendations,
-            severity: self.calculate_failure_severity(&root_causes),
+            severity,
         })
     }
 

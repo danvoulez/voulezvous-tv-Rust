@@ -336,6 +336,7 @@ pub struct SchedulerStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
 
     #[test]
     fn test_schedule_parsing() {

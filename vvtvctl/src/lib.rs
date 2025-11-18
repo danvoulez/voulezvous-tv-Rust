@@ -44,20 +44,9 @@ use vvtv_core::{
     QueueEntry as QueueStoreEntry, QueueError, QueueFilter, QueueMetrics, QueueStatus,
     SearchConfig, SearchEngine, SearchSessionFactory, SessionRecorder, SessionRecorderConfig,
     SmokeMode, SmokeTestOptions, SmokeTestResult, SqlitePlanStore, ViewerSession,
-    ComplianceError, ComplianceSuite, ComplianceSuiteConfig, ComplianceSummary, ConfigBundle,
-    ContentSearcher, CsamScanReport, CsamScanner, DashboardArtifacts, DashboardError,
-    DashboardGenerator, DiscoveryConfig, DiscoveryLoop, DiscoveryPbd, DiscoveryPlanStore,
-    DiscoveryStats, DispatchAction, DispatchStatus, DrmDetectionConfig, DrmScanReport, DrmScanner,
-    EconomyError, EconomyEvent, EconomyEventType, EconomyStore, EconomyStoreBuilder, EconomySummary,
-    IncidentDispatch, IncidentError, IncidentHistoryWriter, IncidentNotifier, IncidentReport,
-    IncidentSeverity, LedgerExport, LicenseAuditReport, LicenseAuditor, MetricRecord, MetricsStore,
-    MicroSpotContract, MicroSpotInjection, MicroSpotManager, MonetizationDashboard, MonitorError,
-    NewEconomyEvent, NewViewerSession, Plan, PlanAuditFinding, PlanAuditKind, PlanBlacklistEntry,
-    PlanImportRecord, PlanMetrics, PlanStatus, PlayBeforeDownload, PlayoutQueueStore,
-    ProfileManager, QaMetricsStore, QaStatistics, QueueEntry as QueueStoreEntry, QueueError,
-    QueueFilter, QueueMetrics, QueueStatus, SearchConfig, SearchEngine, SearchSessionFactory,
-    SessionRecorder, SessionRecorderConfig, SmokeMode, SmokeTestOptions, SmokeTestResult,
-    SqlitePlanStore, ViewerSession,
+    ComplianceError, ComplianceSuite, ComplianceSuiteConfig, ComplianceSummary,
+    CsamScanReport, CsamScanner, DrmDetectionConfig, DrmScanReport, DrmScanner,
+    LicenseAuditReport, LicenseAuditor,
 };
 
 #[cfg(test)]
@@ -3046,6 +3035,11 @@ impl DisplayFallback for LicenseAuditReport {
             for (kind, count) in entries {
                 lines.push(format!("  • {:?}: {}", kind, count));
             }
+        }
+        lines.join("\n")
+    }
+}
+
 impl DisplayFallback for IncidentReportResultView {
     fn display(&self) -> String {
         let mut lines = Vec::new();

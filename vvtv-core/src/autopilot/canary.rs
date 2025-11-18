@@ -460,6 +460,11 @@ pub enum RecommendationType {
     ConsiderRollback,
     TimeoutWarning,
     ManualReview,
+    ReduceDuration,
+    ExtendDuration,
+    ParameterAdjustment,
+    QualityReview,
+    InfrastructureReview,
 }
 
 /// Priority levels for recommendations
@@ -546,21 +551,6 @@ pub struct FailureRecommendation {
     pub description: String,
     pub priority: RecommendationPriority,
     pub estimated_impact: String,
-}
-
-/// Additional recommendation types for failure analysis
-#[derive(Debug, Clone, Serialize)]
-pub enum RecommendationType {
-    WaitForSamples,
-    ReadyForAnalysis,
-    ExtendMonitoring,
-    ConsiderRollback,
-    TimeoutWarning,
-    ManualReview,
-    ParameterAdjustment,
-    QualityReview,
-    ExtendDuration,
-    InfrastructureReview,
 }
 
 /// Comprehensive deployment report
@@ -2284,7 +2274,7 @@ impl CanaryDeployment {
             deployment_id: deployment_id.to_string(),
             failure_timestamp: deployment.decision.as_ref().map(|d| d.decision_timestamp).unwrap_or(Utc::now()),
             failure_categories,
-            root_causes,
+            root_causes: root_causes.clone(),
             failure_pattern,
             parameter_changes: deployment.parameter_changes.clone(),
             metrics_summary: deployment.metrics_summary.clone(),
@@ -2740,7 +2730,14 @@ mod tests {
         let metrics_collector = Box::new(MockMetricsCollector::new());
         let mut canary = CanaryDeployment::new(config, metrics_collector);
 
-        let parameter_changes = HashMap::new();
+        let mut parameter_changes = HashMap::new();
+        parameter_changes.insert("selection_temperature".to_string(), ParameterChange {
+            parameter_name: "selection_temperature".to_string(),
+            old_value: 0.5,
+            new_value: 0.6,
+            change_type: ParameterChangeType::Optimization,
+            rationale: "Test change".to_string(),
+        });
 
         // First deployment should succeed
         let result1 = canary.start_deployment("deployment_1".to_string(), parameter_changes.clone());
@@ -3049,7 +3046,10 @@ mod tests {
 
     #[test]
     fn test_process_active_deployments() {
-        let config = CanaryConfig::default();
+        let config = CanaryConfig {
+            max_concurrent_deployments: 2,
+            ..Default::default()
+        };
         let mut mock_collector = MockMetricsCollector::new();
         
         // Set up multiple deployments
@@ -3064,14 +3064,30 @@ mod tests {
             control_samples: 200,
             total_samples: 250,
         });
-        
+
         let mut canary = CanaryDeployment::new(config, Box::new(mock_collector));
 
-        let parameter_changes = HashMap::new();
+        let mut parameter_changes1 = HashMap::new();
+        parameter_changes1.insert("selection_temperature".to_string(), ParameterChange {
+            parameter_name: "selection_temperature".to_string(),
+            old_value: 0.5,
+            new_value: 0.6,
+            change_type: ParameterChangeType::Optimization,
+            rationale: "Test change 1".to_string(),
+        });
+
+        let mut parameter_changes2 = HashMap::new();
+        parameter_changes2.insert("selection_temperature".to_string(), ParameterChange {
+            parameter_name: "selection_temperature".to_string(),
+            old_value: 0.6,
+            new_value: 0.7,
+            change_type: ParameterChangeType::Optimization,
+            rationale: "Test change 2".to_string(),
+        });
 
         // Start multiple deployments
-        canary.start_deployment("deployment_1".to_string(), parameter_changes.clone()).unwrap();
-        canary.start_deployment("deployment_2".to_string(), parameter_changes).unwrap();
+        canary.start_deployment("deployment_1".to_string(), parameter_changes1).unwrap();
+        canary.start_deployment("deployment_2".to_string(), parameter_changes2).unwrap();
 
         // Process all active deployments
         let results = canary.process_active_deployments().unwrap();
@@ -3099,10 +3115,17 @@ mod tests {
             control_samples: 800,
             total_samples: 1000,
         });
-        
+
         let mut canary = CanaryDeployment::new(config, Box::new(mock_collector));
 
-        let parameter_changes = HashMap::new();
+        let mut parameter_changes = HashMap::new();
+        parameter_changes.insert("selection_temperature".to_string(), ParameterChange {
+            parameter_name: "selection_temperature".to_string(),
+            old_value: 0.5,
+            new_value: 0.6,
+            change_type: ParameterChangeType::Optimization,
+            rationale: "Test change".to_string(),
+        });
         canary.start_deployment("timeout_test".to_string(), parameter_changes).unwrap();
 
         // Should detect timeout
